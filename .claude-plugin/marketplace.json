@@ -1,0 +1,11 @@
+{
+  "name": "agent-watch",
+  "owner": { "name": "mtsmyassin" },
+  "plugins": [
+    {
+      "name": "agent-watch",
+      "source": "./",
+      "description": "A live pane of what every agent in the session is working on right now."
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "agent-watch",
+  "version": "0.1.0",
+  "description": "A live pane of what every agent in the session is working on right now.",
+  "types": "./types/index.d.ts"
+}
