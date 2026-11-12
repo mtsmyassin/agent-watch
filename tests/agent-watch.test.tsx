@@ -303,7 +303,9 @@ test('an agent the mod never heard spawn is picked up from the roster', async ($
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const row = await ui.find({ key: 'agent:b7' })
 
-  expect(row?.text).toContain('general-purpose')
+  // The row says the type short; the roster the model reads keeps its name.
+  expect(row?.text).toContain('General')
+  expect(row?.text).not.toContain('general-purpose')
   expect(row?.text).toContain('review the diff')
   expect(w.opened).toBe(1)
   await ui.unmount()
@@ -872,7 +874,7 @@ test('a tool call reads as a person would say it', () => {
   )
   expect(
     describeCall('mcp__firecrawl__firecrawl_search', { query: 'claude hooks' }),
-  ).toBe('Using firecrawl search: claude hooks')
+  ).toBe('Searching: claude hooks')
   expect(describeCall('TaskList', {})).toBe('Checking the task list')
   expect(describeCall('Bash', { command: 'x'.repeat(200) }).length).toBe(72)
 })
@@ -880,7 +882,7 @@ test('a tool call reads as a person would say it', () => {
 test('no internal tool name and no full folder path reaches a row', () => {
   expect(describeCall('SubagentHandback', {})).toBe('Reporting back')
   expect(describeCall('NotebookRead', { notebook_path: '/home/me/lab/run.ipynb' })).toBe(
-    'Using notebook read: run.ipynb',
+    'Reading notebook: run.ipynb',
   )
   expect(
     describeCall('Bash', {
@@ -897,6 +899,71 @@ test('no internal tool name and no full folder path reaches a row', () => {
   expect(unpathed('https://example.com/a/b/c src/**/*.ts core/config.py')).toBe(
     'https://example.com/a/b/c src/**/*.ts core/config.py',
   )
+})
+
+test('a connected tool is said in plain words, never by its raw name', () => {
+  const said = [
+    describeCall('mcp__claude-in-chrome__read_page', {}),
+    describeCall('mcp__claude-in-chrome__javascript_tool', { text: 'document.title' }),
+    describeCall('mcp__claude-in-chrome__tabs_context_mcp', {}),
+    describeCall('mcp__claude_ai_Google_Calendar__list_events', {}),
+    describeCall('mcp__telegram__telegram_send_message', { message: 'hello' }),
+    describeCall('mcp__playwright__browser_take_screenshot', {}),
+    describeCall('mcp__claude-in-chrome__navigate', { url: 'https://docs.example.com/a' }),
+    describeCall('mcp__acme-crm__zzq', {}),
+    describeCall('mcp__plugin_apollo_apollo__apollo_contacts_search', { query: 'vp sales' }),
+  ]
+
+  expect(said).toEqual([
+    'Reading page',
+    'Using the browser',
+    'Using the browser',
+    'Listing events',
+    'Sending message',
+    'Capturing in the browser',
+    'Opening: docs.example.com',
+    'Using Acme Crm',
+    'Searching contacts: vp sales',
+  ])
+  // No server id, no snake case, no double underscore reaches the pane.
+  expect(said.join(' ')).not.toMatch(/mcp|__|_|claude in chrome|javascript/)
+  expect(settled('Reading page')).toBe('Read page')
+  expect(settled('Listing events')).toBe('Listed events')
+  expect(settled('Using the browser')).toBe('Used the browser')
+})
+
+test('the type is said short, so the task keeps the room', () => {
+  const lines = plain(drawn(FOUR, NOW, DOCK))
+
+  // Docked, the task has 30 letters (20 while the type read `general-purpose`):
+  // a five-word task shows whole, a longer one is cut at a word's end.
+  expect(lines[1]?.startsWith('● Explore  List words in each .txt file    Reading')).toBe(true)
+  expect(lines[2]?.startsWith('● General  Count lines in each .txt file   Searched')).toBe(true)
+  expect(lines[3]?.startsWith('✓ Explore  Find mango mentions in .txt…    11 tools')).toBe(true)
+  // Beside the pane the engine's own list still says the full name.
+  expect(lines.join('\n')).not.toContain('general-purpose')
+  // A dock is at most 45% of the terminal: at 170 columns it has one column
+  // less than asked for, and the 29-letter task still shows whole.
+  const tight = plain(drawn(FOUR, NOW, { ...DOCK, columns: 73 }))
+
+  expect(tight[2]?.startsWith('● General  Count lines in each .txt file  Searched')).toBe(true)
+  // A plugin's agent drops its prefix, and a long name is cut at twelve
+  // letters, so it costs the task five letters and no more.
+  const long = plain(
+    drawn([agent('x1', { type: 'ecc:security-reviewer' })], NOW, DOCK),
+  )
+
+  expect(long[1]?.startsWith('● security-re…  List words in each .txt…   Starting')).toBe(true)
+})
+
+test('the rows start right under the header, docked and inline alike', () => {
+  for (const sight of [DOCK, INLINE]) {
+    const lines = plain(drawn(FOUR, NOW, sight))
+
+    expect(lines[0]?.startsWith('Agents')).toBe(true)
+    expect(lines[1]?.startsWith('● Explore')).toBe(true)
+    expect(lines.every(line => line.trim() !== '')).toBe(true)
+  }
 })
 
 test('a call that is over is said in the past', () => {
@@ -1051,9 +1118,9 @@ test('in a narrow pane the row folds, on every surface', async ($, on) => {
 
 const NOW = 1_800_000_000_000
 /** The docked pane the mod asks for, less a clear column each side. */
-const DOCK: Sight = { columns: 74, rows: 40, isDocked: true, isPinned: false }
+const DOCK: Sight = { columns: 74, rows: 40, isPinned: false }
 /** The band above the prompt in a 170-column terminal. */
-const INLINE: Sight = { columns: 166, rows: 12, isDocked: false, isPinned: false }
+const INLINE: Sight = { columns: 166, rows: 12, isPinned: false }
 
 /** A row as the mod holds it, `ago` ms into its run. */
 const agent = (
@@ -1289,7 +1356,7 @@ test('a pane too narrow for the columns folds each row instead of crushing it', 
   expect(lines[1]?.endsWith('11s')).toBe(true)
   expect(lines[2]).toBe('  Reading menu.txt · 8 tools')
   expect(lines[4]).toBe('  Searched *.txt · 8 tools')
-  expect(lines[3]).toContain('general-purpose')
+  expect(lines[3]?.startsWith('● General')).toBe(true)
 })
 
 test('a finished agent fades, its result closes to the row, and it leaves by itself', () => {
@@ -1354,8 +1421,8 @@ test('a child agent sits in under its parent without breaking the columns', () =
   ]
   const lines = plain(drawn(family, NOW, INLINE))
 
-  expect(lines[1]?.startsWith('● general-purpose  Run the review')).toBe(true)
-  expect(lines[2]?.startsWith('●   Explore        Read the diff')).toBe(true)
+  expect(lines[1]?.startsWith('● General    Run the review')).toBe(true)
+  expect(lines[2]?.startsWith('●   Explore  Read the diff')).toBe(true)
 })
 
 test("the mod's clock is the real one", () => {

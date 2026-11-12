@@ -574,7 +574,6 @@ export const register: Register = on => {
     const drawing = drawn(list, now, {
       columns: e.props.bodyColumns - gutter * 2,
       rows: e.props.scroll.bodyRows,
-      isDocked,
       isPinned,
     })
     // Every working agent's mark takes the same step of the same breath.
@@ -602,7 +601,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" paddingX={gutter}>
         <Text wrap="truncate-end">{drawing.head.map(paint)}</Text>
-        <Box flexDirection="column" marginTop={isDocked ? 1 : 0}>
+        <Box flexDirection="column">
           {drawing.lines.map(line =>
             line.id === undefined ? (
               <Text wrap="truncate-end">{line.spans.map(paint)}</Text>

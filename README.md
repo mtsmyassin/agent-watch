@@ -2,7 +2,7 @@
 
 A live pane for Claude Code that shows what every subagent in the session is doing right now.
 
-Each agent gets one aligned row: a mark, its type, the task it was given, what it is doing and how long it has run. What it is doing is said the way a person would say it: `Reading notes.txt`, `Searching *.txt`, `Running pytest -x`, then `Read notes.txt` once the call is over, with the number of tools used so far. An agent that finishes fades to a dim row with a check mark and a one-line summary of its answer.
+Each agent gets one aligned row: a mark, its type, the task it was given, what it is doing and how long it has run. What it is doing is said the way a person would say it: `Reading notes.txt`, `Searching *.txt`, `Running pytest -x`, then `Read notes.txt` once the call is over, with the number of tools used so far. A connected tool is said the same way (`Reading page`, `Listing events`, `Using the browser`), never by its internal name, and a long type is said short (`general-purpose` reads `General`). An agent that finishes fades to a dim row with a check mark and a one-line summary of its answer.
 
 The look is deliberately quiet: no boxes and no bars, order shown by weight and brightness, and one accent color that marks an agent at work. Every working agent's mark breathes in the same slow pulse.
 

@@ -283,6 +283,114 @@ const BOOKKEEPING: Readonly<Record<string, string>> = {
 
 export const isBookkeeping = (tool: string): boolean => tool in BOOKKEEPING
 
+/**
+ * The verb in a tool's name as the start of a sentence, now and once the call
+ * is over: `read_page` reads `Reading page`, then `Read page`.
+ */
+const VERBS: Readonly<Record<string, readonly [string, string]>> = {
+  read: ['Reading', 'Read'],
+  get: ['Getting', 'Got'],
+  fetch: ['Fetching', 'Fetched'],
+  list: ['Listing', 'Listed'],
+  search: ['Searching', 'Searched'],
+  find: ['Finding', 'Found'],
+  query: ['Querying', 'Queried'],
+  create: ['Creating', 'Created'],
+  add: ['Adding', 'Added'],
+  write: ['Writing', 'Wrote'],
+  update: ['Updating', 'Updated'],
+  edit: ['Editing', 'Edited'],
+  delete: ['Deleting', 'Deleted'],
+  remove: ['Removing', 'Removed'],
+  send: ['Sending', 'Sent'],
+  post: ['Posting', 'Posted'],
+  reply: ['Replying to', 'Replied to'],
+  run: ['Running', 'Ran'],
+  execute: ['Running', 'Ran'],
+  navigate: ['Opening', 'Opened'],
+  open: ['Opening', 'Opened'],
+  close: ['Closing', 'Closed'],
+  click: ['Clicking', 'Clicked'],
+  screenshot: ['Capturing', 'Captured'],
+  capture: ['Capturing', 'Captured'],
+  snapshot: ['Capturing', 'Captured'],
+  generate: ['Generating', 'Generated'],
+  deploy: ['Deploying', 'Deployed'],
+  check: ['Checking', 'Checked'],
+  validate: ['Checking', 'Checked'],
+  verify: ['Checking', 'Checked'],
+  scrape: ['Reading', 'Read'],
+  crawl: ['Crawling', 'Crawled'],
+  extract: ['Extracting', 'Extracted'],
+  download: ['Downloading', 'Downloaded'],
+  upload: ['Uploading', 'Uploaded'],
+  export: ['Exporting', 'Exported'],
+  import: ['Importing', 'Imported'],
+  start: ['Starting', 'Started'],
+  stop: ['Stopping', 'Stopped'],
+  restart: ['Restarting', 'Restarted'],
+  describe: ['Describing', 'Described'],
+  resolve: ['Resolving', 'Resolved'],
+  publish: ['Publishing', 'Published'],
+  merge: ['Merging', 'Merged'],
+  move: ['Moving', 'Moved'],
+  copy: ['Copying', 'Copied'],
+  share: ['Sharing', 'Shared'],
+}
+
+/** Words in a tool's name that say nothing about what it does. */
+const FILLER = new Set(['tool', 'tools', 'mcp', 'api', 'take', 'do', 'the', 'a'])
+
+/** Servers a person knows by what they are, not by their id. */
+const SERVICES: Readonly<Record<string, string>> = {
+  'claude-in-chrome': 'the browser',
+  playwright: 'the browser',
+  'chrome-devtools': 'the browser',
+}
+
+/**
+ * A connected server as a person names it: `claude_ai_Google_Calendar` is
+ * `Google Calendar`, `claude-in-chrome` is `the browser`.
+ */
+function service(server: string): string {
+  const bare = server.replace(/^(?:claude_ai_|plugin_[a-z0-9-]+_)/i, '')
+
+  return (
+    SERVICES[bare.toLowerCase()] ??
+    bare
+      .split(/[_\s-]+/)
+      .filter(word => word !== '')
+      .map(word => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+      .join(' ')
+  )
+}
+
+/**
+ * A sentence for a tool this file has no sentence of its own for, built from
+ * the verb in its name: never the name itself. `where` is the service it
+ * belongs to, when it is a connected one.
+ */
+function phrased(words: readonly string[], where: string): string {
+  const at = words.findIndex(word => word in VERBS)
+  const verb = at === -1 ? undefined : VERBS[words[at] ?? '']
+  const what = words.filter((_, index) => index !== at).join(' ')
+
+  if (verb === undefined) {
+    return where !== '' ? `Using ${where}` : what === '' ? 'Working' : `Using ${what}`
+  }
+
+  if (what !== '') {
+    return `${verb[0]} ${what}`
+  }
+
+  if (where === '') {
+    return verb[0]
+  }
+
+  // A place takes `in` (`Opening in the browser`), a named service `with`.
+  return `${verb[0]} ${where.startsWith('the ') ? 'in' : 'with'} ${where}`
+}
+
 /** Calls that need no detail to be understood. */
 const PLAIN: Readonly<Record<string, string>> = {
   ...BOOKKEEPING,
@@ -350,17 +458,24 @@ export function describeCall(
       return say('Using the skill', text('skill'))
   }
 
+  // Any other tool, a connected server's included, is said from the verb in
+  // its name: `mcp__claude-in-chrome__read_page` reads `Reading page`.
   const [server = '', ...rest] = tool.startsWith('mcp__')
     ? tool.split('__').slice(1)
-    : []
-  // `mcp__firecrawl__firecrawl_search` is `firecrawl search`, said once.
-  const action = worded(rest.join(' '))
-  const name =
-    server === ''
-      ? worded(tool)
-      : action.startsWith(worded(server))
-        ? action
-        : `${worded(server)} ${action}`.trim()
+    : ['', tool]
+  const where = server === '' ? '' : service(server)
+  // The service's own words say nothing twice: `browser_click` is a click.
+  const own = new Set([
+    ...worded(server).split(' '),
+    ...where.toLowerCase().split(' '),
+  ])
+  const words = worded(rest.join(' '))
+    .split(' ')
+    .filter(word => word !== '' && !own.has(word) && !FILLER.has(word))
+  const lead = phrased(words, where)
+  // Where the call names its subject, that says more than the service does:
+  // `Searching: claude hooks`. A name with no verb keeps the service.
+  const opening = words.some(word => word in VERBS) ? phrased(words, '') : lead
 
   for (const field of SUBJECT) {
     const value = text(field)
@@ -372,11 +487,11 @@ export function describeCall(
           ? host(value)
           : unpathed(value)
 
-      return say(`Using ${name}:`, subject)
+      return say(`${opening}:`, subject)
     }
   }
 
-  return say('Using', name)
+  return brief(lead, 72)
 }
 
 /** Each sentence's opening as it reads once the call is over. */
@@ -403,7 +518,8 @@ const SETTLED: readonly (readonly [string, string])[] = [
 
 /** A call that is over, in the past: `Reading notes.txt` reads `Read notes.txt`. */
 export function settled(activity: string): string {
-  for (const [now, then] of SETTLED) {
+  // The sentences this file writes out first, then any verb a tool's name gave.
+  for (const [now, then] of [...SETTLED, ...Object.values(VERBS)]) {
     if (activity.startsWith(now)) {
       return `${then}${activity.slice(now.length)}`
     }
@@ -907,7 +1023,6 @@ export type Line = { id?: string; spans: Span[] }
 export type Sight = {
   columns: number
   rows: number
-  isDocked: boolean
   /** True when the person asked for the pane: finished agents stay listed. */
   isPinned: boolean
 }
@@ -920,11 +1035,14 @@ export const GONE_MS = 120_000
 /** The finished agents listed at once; the rest are a count. */
 const FINISHED_KEPT = 5
 const GAP = '  '
-const TYPE_MAX = 15
+const TYPE_MAX = 12
 const TASK_MIN = 16
 const DETAIL_MIN = 18
-/** What the activity column takes before the task gets more: `Reading notes.txt · 7 tools`. */
-const DETAIL_WANT = 28
+/**
+ * What the activity column takes before the task gets more: `Read planets.txt
+ * · 9 tools`. Kept tight, since the task is what a longer cut costs most.
+ */
+const DETAIL_WANT = 26
 /** From this width a finished agent's result rides on its own row. */
 const RESULT_MIN = 44
 
@@ -998,9 +1116,20 @@ export function shaped(
   }
 }
 
-/** The agent's type as its row names it: a plugin's prefix dropped. */
-const typeName = (row: AgentRow): string =>
-  row.type.slice(row.type.lastIndexOf(':') + 1) || row.type
+/** Types the engine names at length, as a row says them. */
+const TYPE_NAMES: Readonly<Record<string, string>> = {
+  'general-purpose': 'General',
+}
+
+/**
+ * The agent's type as its row names it, kept short so the task has the room:
+ * a plugin's prefix dropped, `general-purpose` said as `General`.
+ */
+export function typeName(row: AgentRow): string {
+  const bare = row.type.slice(row.type.lastIndexOf(':') + 1) || row.type
+
+  return TYPE_NAMES[bare] ?? bare
+}
 
 /** `7 tools`; nothing at all before the first call, where a zero says nothing. */
 const counted = (row: AgentRow): string =>
@@ -1198,8 +1327,8 @@ export function drawn(
   })
   const draw = (one: Placed): Line[] =>
     rowLines(one, shape, columns, times.get(one.seat.row.id) ?? '', now)
-  // The header takes a row, and docked a clear row follows it.
-  let room = Math.max(3, sight.rows - 1 - (sight.isDocked ? 1 : 0))
+  // The header takes a row; the agents start on the next, docked or inline.
+  let room = Math.max(3, sight.rows - 1)
   const perRow = shape.isFolded ? 2 : 1
   const fitting =
     working.length * perRow <= room
