@@ -1,0 +1,1115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Agents</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+/* DeltaO.ai tokens (DESIGN.md). One accent: emerald means work is happening now.
+   Shadows and blur are used here by the owner's call for this window, kept low. */
+:root {
+  --canvas: #08090a;
+  --text-primary: #EDEDEC;
+  --text-secondary: #A1A1A6;
+  --text-tertiary: #6B6B73;
+  --text-quaternary: #48484A;
+  --accent-emerald: #0D9668;
+  --emerald-subtle: rgba(13, 150, 104, 0.16);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-active: rgba(255, 255, 255, 0.12);
+  --sans: 'Inter', 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  /* Filled in by the script from a real spring, so CSS moves like the rest. */
+  --spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-d: 0.4s;
+  --who: 300px;
+  --lane: 62px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--canvas); color: var(--text-primary); }
+body { font: 400 14px/1.43 var(--sans); letter-spacing: -0.05px; font-feature-settings: 'cv01', 'cv02', 'ss01', 'tnum'; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; letter-spacing: inherit; background: none; border: 0; text-align: left; }
+.mono { font-family: var(--mono); letter-spacing: 0; }
+.label { font: 600 11px/1 var(--sans); letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-tertiary); }
+
+/* Light that follows the work: a little warmer while agents run. */
+.ambient { position: fixed; inset: 0; pointer-events: none; opacity: 0.55; background: radial-gradient(1100px 380px at 50% -120px, rgba(255, 255, 255, 0.05), transparent 70%); transition: opacity 0.9s var(--spring); }
+.ambient::after { content: ''; position: absolute; inset: 0; opacity: 0; background: radial-gradient(900px 320px at 72% -140px, rgba(13, 150, 104, 0.09), transparent 70%); transition: opacity 0.9s var(--spring); }
+body.working .ambient { opacity: 1; }
+body.busy .ambient::after { opacity: 1; }
+
+.app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+
+.head { flex: none; padding: 24px 32px 20px; display: flex; align-items: flex-end; justify-content: space-between; }
+.head .id, .metric, #float, #detail { opacity: 0; }
+.head h1 { font: 600 28px/1.14 var(--sans); letter-spacing: -0.5px; }
+.sub { margin-top: 6px; font: 400 13px/1.33 var(--sans); color: var(--text-secondary); }
+.metrics { display: flex; gap: 40px; align-items: flex-end; }
+.metric .value { font: 700 28px/1 var(--sans); letter-spacing: -1px; height: 28px; white-space: nowrap; }
+.metric .value.live { color: var(--accent-emerald); transition: color 0.5s var(--spring); }
+body:not(.working) .metric .value.live { color: var(--text-tertiary); }
+.metric .label { margin-top: 8px; display: block; }
+.ghost { height: 32px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--text-quaternary); border-radius: 2px; font: 500 12px/1 var(--sans); letter-spacing: 0.5px; cursor: pointer; transition: transform 75ms ease-out, border-color 0.2s, background-color 0.2s; }
+.ghost:active { transform: scale(0.97); }
+.ghost:focus-visible, .who:focus-visible, .isl-pill:focus-visible, .isl-open:focus-visible, .dock:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+
+/* A number that rolls: each changed digit leaves upward as the new one arrives. */
+.roll { display: inline-flex; }
+.slot { position: relative; display: inline-block; }
+.glyph { display: inline-block; will-change: transform, opacity; }
+.glyph.out { position: absolute; left: 0; top: 0; }
+
+.timeline { flex: 0 1 auto; margin: 0 32px; min-height: 92px; max-height: calc(100vh - 96px - 250px); overflow-y: auto; overflow-x: hidden; border-top: 1px solid var(--border-default); scrollbar-width: thin; scrollbar-color: var(--text-quaternary) transparent; }
+.axis { position: sticky; top: 0; z-index: 4; height: 30px; display: grid; grid-template-columns: var(--who) 1fr; align-items: center; border-bottom: 1px solid var(--border-default); background: rgba(8, 9, 10, 0.72); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); }
+.axis > .label { padding-left: 12px; }
+.ticks { position: relative; height: 100%; }
+.ticks span { position: absolute; left: 0; top: 9px; font: 400 11px/1 var(--mono); color: var(--text-tertiary); white-space: nowrap; will-change: transform; transition: opacity 0.25s ease-out; }
+.ticks span.hid, .ticks span.gone, .grid i.gone { opacity: 0; }
+.ticks span.now { color: var(--text-primary); font-weight: 500; }
+@starting-style { .ticks span, .grid i { opacity: 0; } }
+
+.lanes { position: relative; min-height: var(--lane); }
+.plate { position: absolute; left: 0; right: 0; top: 0; height: var(--lane); opacity: 0; background: var(--surface-2); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), inset 0 -1px 0 rgba(0, 0, 0, 0.35); will-change: transform; transition: opacity 0.3s ease-out; }
+.plate.on { opacity: 1; }
+.grid { position: absolute; left: var(--who); right: 0; top: 0; bottom: 0; pointer-events: none; overflow: hidden; }
+.grid i { position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: var(--border-default); will-change: transform; transition: opacity 0.25s ease-out; }
+.grid .nowline { background: var(--text-tertiary); z-index: 2; transition: background-color 0.6s ease-out; }
+.grid .nowline::after { content: ''; position: absolute; top: 0; bottom: 0; left: -16px; width: 33px; opacity: 0; background: linear-gradient(90deg, transparent, rgba(13, 150, 104, 0.13), transparent); transition: opacity 0.6s ease-out; }
+body.busy .grid .nowline { background: var(--accent-emerald); }
+body.busy .grid .nowline::after { opacity: 1; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; font: 400 14px/1.47 var(--sans); color: var(--text-secondary); transition: opacity 0.3s ease-out; }
+.lanes.has .empty { opacity: 0; pointer-events: none; }
+
+.lane { position: absolute; left: 0; right: 0; top: 0; height: var(--lane); border-bottom: 1px solid var(--border-default); will-change: transform; cursor: pointer; transition: background-color 0.2s ease-out; }
+.lane-in { height: 100%; display: grid; grid-template-columns: var(--who) 1fr; }
+.who { position: relative; padding: 0 16px 0 12px; display: grid; grid-template-columns: 10px 1fr auto; column-gap: 12px; row-gap: 5px; align-content: center; cursor: pointer; min-width: 0; }
+.who::before { content: ''; position: absolute; left: -32px; top: 0; bottom: 0; width: 150px; pointer-events: none; opacity: 0; background: radial-gradient(70px 34px at 49px 50%, rgba(13, 150, 104, 0.2), transparent 72%); transition: opacity 0.7s var(--spring); }
+.lane.busy .who::before { opacity: 1; }
+.type { font: 600 14px/1 var(--sans); letter-spacing: -0.1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.4s ease-out, transform 75ms ease-out; transform-origin: 0 50%; }
+.who:active .type { transform: scale(0.97); }
+.who .clock { font: 400 12px/1 var(--mono); color: var(--text-secondary); align-self: center; transition: color 0.4s ease-out; }
+.task { grid-column: 2 / 4; font: 400 12.5px/1.2 var(--sans); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.4s ease-out; }
+.lane.over .type, .lane.over .task, .lane.over .who .clock { color: var(--text-tertiary); }
+.lane.failed .type { color: var(--text-secondary); }
+
+/* The mark: a dot that breathes while the agent works, a check once it is done. */
+.mark { position: relative; width: 10px; height: 10px; align-self: center; }
+.mark > * { position: absolute; inset: 0; display: grid; place-items: center; transition: opacity 0.3s ease-out, transform var(--spring-d) var(--spring); }
+.dot::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-emerald); }
+.chk { font: 600 12px/1 var(--sans); color: var(--text-tertiary); opacity: 0; transform: scale(0.6); }
+.mark[data-s="running"] .dot { animation: breathe 2.4s ease-in-out infinite; animation-delay: var(--phase, 0ms); }
+.mark[data-s="pending"] .dot::before, .mark[data-s="waiting"] .dot::before, .mark[data-s="idle"] .dot::before { background: none; border: 1.5px solid var(--text-secondary); }
+.mark[data-s="completed"] .dot, .mark[data-s="failed"] .dot, .mark[data-s="killed"] .dot { opacity: 0; transform: scale(0.4); }
+.mark[data-s="completed"] .chk, .mark[data-s="failed"] .chk, .mark[data-s="killed"] .chk { opacity: 1; transform: scale(1); }
+.mark[data-s="failed"] .chk, .mark[data-s="killed"] .chk { color: var(--text-secondary); }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.42; } }
+
+.track { position: relative; overflow: hidden; contain: layout style; }
+.track::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--border-default); }
+.life { position: absolute; left: 0; top: 21px; height: 20px; width: 200px; transform-origin: 0 50%; background: rgba(255, 255, 255, 0.045); will-change: transform; transition: background-color 0.4s ease-out; }
+.lane.over .life { background: rgba(255, 255, 255, 0.025); }
+.layer { position: absolute; left: 0; top: 0; bottom: 0; width: 0; transform-origin: 0 0; will-change: transform; }
+.bar { position: absolute; top: 21px; height: 20px; border-radius: 2px; background: rgba(255, 255, 255, 0.13); transform-origin: 0 50%; transition: background-color 0.4s ease-out; }
+.bar.bad, .fly.done.bad { background: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28); }
+.lane.over .bar { background: rgba(255, 255, 255, 0.07); }
+.lane.over .bar.bad { background: none; }
+.liv { position: absolute; inset: 0; }
+.fly { position: absolute; left: 0; top: 21px; height: 20px; min-width: 3px; border-radius: 2px; border: 1px solid var(--accent-emerald); background: var(--emerald-subtle); overflow: hidden; display: flex; align-items: center; will-change: transform, width; transition: background-color 0.3s ease-out, border-color 0.3s ease-out; box-shadow: 0 0 14px -4px rgba(13, 150, 104, 0.55); }
+.fly .lbl { padding: 0 8px; font: 500 11px/1 var(--mono); white-space: nowrap; opacity: 0; transition: opacity 0.25s ease-out; }
+.fly.wide .lbl { opacity: 1; }
+.fly.done { background: rgba(255, 255, 255, 0.13); border-color: transparent; box-shadow: none; }
+.fly.done .lbl { opacity: 0; }
+.lane.t2 .bar, .lane.t2 .fly { height: 9px; }
+.lane.t2 [data-k="0"] { top: 21px; } .lane.t2 [data-k="1"] { top: 32px; }
+.lane.t3 .bar, .lane.t3 .fly { height: 6px; }
+.lane.t3 [data-k="0"] { top: 20px; } .lane.t3 [data-k="1"] { top: 28px; } .lane.t3 [data-k="2"] { top: 36px; }
+.lane.t2 .fly .lbl, .lane.t3 .fly .lbl { display: none; }
+.end { position: absolute; left: 0; top: 21px; height: 20px; display: flex; align-items: center; font: 400 11px/1 var(--mono); color: var(--text-tertiary); white-space: nowrap; opacity: 0; will-change: transform; transition: opacity 0.4s ease-out; }
+.lane.over .end { opacity: 1; }
+
+/* The detail sheet: raised a little off the canvas. */
+.detail { flex: 1 1 250px; min-height: 250px; margin-top: 18px; padding: 22px 32px 20px; display: grid; grid-template-columns: 1fr 340px; column-gap: 48px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012) 60%); border-top: 1px solid rgba(255, 255, 255, 0.08); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 -1px 0 rgba(0, 0, 0, 0.6), 0 -10px 22px -14px rgba(0, 0, 0, 0.8), 0 -28px 48px -30px rgba(0, 0, 0, 0.9); overflow: hidden; }
+.log { min-width: 0; display: flex; flex-direction: column; }
+.detail h2 { margin: 10px 0 12px; font: 600 20px/1.2 var(--sans); letter-spacing: -0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity 0.14s ease-out; min-height: 24px; }
+.detail h2.swap { opacity: 0; }
+.detail h2 b, .ghost-title b { font-weight: 600; }
+.detail h2 span, .ghost-title span { color: var(--text-tertiary); font-weight: 400; }
+.rows { position: relative; flex: 1; min-height: 33px; overflow: hidden; }
+.row { position: absolute; left: 0; right: 0; top: 0; height: 33px; display: grid; grid-template-columns: 64px 1fr auto; align-items: center; border-bottom: 1px solid rgba(72, 72, 74, 0.4); font: 400 12.5px/1.2 var(--mono); color: var(--text-secondary); will-change: transform; transition: opacity 0.18s ease-out, color 0.3s ease-out; }
+.row.gone { opacity: 0; }
+.row .t, .row .d { color: var(--text-tertiary); }
+.row .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px; }
+.row .l::before { content: ''; display: inline-block; width: 0; height: 8px; border-radius: 50%; background: var(--accent-emerald); margin-right: 0; vertical-align: 0; transition: width 0.25s var(--spring), margin-right 0.25s var(--spring); }
+.row.open { color: var(--text-primary); }
+.row.open .l::before { width: 8px; margin-right: 10px; }
+.row.open .d { color: var(--text-secondary); }
+.rows .none { position: absolute; left: 0; top: 8px; font: 400 13.5px/1.47 var(--sans); color: var(--text-secondary); }
+.facts { display: grid; grid-template-columns: 1fr 1fr 1fr; margin: 12px 0 22px; }
+.facts .value { font: 700 24px/1 var(--sans); letter-spacing: -0.8px; height: 24px; white-space: nowrap; }
+.facts .label { display: block; margin-top: 8px; }
+.result { margin-top: 10px; font: 400 13.5px/1.47 var(--sans); color: var(--text-secondary); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; }
+.result.has { color: var(--text-primary); }
+
+/* The lane's name in flight to the sheet's title. */
+.ghost-title { position: fixed; left: 0; top: 0; z-index: 30; pointer-events: none; white-space: nowrap; font: 600 14px/1.2 var(--sans); letter-spacing: -0.2px; transform-origin: 0 0; will-change: transform, opacity; }
+
+.tip { position: fixed; left: 0; top: 0; z-index: 40; pointer-events: none; opacity: 0; padding: 7px 10px; border-radius: 2px; white-space: nowrap; font: 400 12px/1.2 var(--mono); color: var(--text-primary); background: rgba(24, 25, 27, 0.78); -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 6px 16px -6px rgba(0, 0, 0, 0.7), 0 18px 36px -18px rgba(0, 0, 0, 0.6); will-change: transform, opacity; transition: opacity 0.14s ease-out; }
+.tip.on { opacity: 1; }
+.tip b { font-weight: 400; color: var(--text-secondary); }
+
+/* Floating: the window draws in to the size of the island it hands over to. */
+.frame { position: fixed; inset: 0; z-index: 50; pointer-events: none; opacity: 0; border: 1px solid var(--border-active); border-radius: 2px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 24px -10px rgba(0, 0, 0, 0.8), 0 30px 60px -30px rgba(0, 0, 0, 0.9); }
+.dock { position: fixed; left: 50%; top: 50%; z-index: 51; width: 420px; height: 64px; margin: -32px 0 0 -210px; padding: 0 20px; display: flex; align-items: center; gap: 12px; font: 500 14px/1 var(--sans); cursor: pointer; opacity: 0; will-change: transform, opacity; }
+.dock[hidden] { display: none; }
+.dock .hint { margin-left: auto; font: 400 12px/1 var(--sans); color: var(--text-secondary); }
+
+/* The island, drawn in its own small always-on-top window. */
+html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow: hidden; }
+.isl { height: 100%; display: flex; flex-direction: column; color: var(--text-primary); font: 400 14px/1.43 var(--sans); font-feature-settings: 'cv01', 'cv02', 'ss01', 'tnum'; -webkit-font-smoothing: antialiased; animation: isl-in var(--spring-d) var(--spring) both; }
+@keyframes isl-in { from { opacity: 0; transform: scale(0.96); } }
+.isl-pill { flex: none; height: 64px; width: 100%; padding: 0 20px; display: flex; align-items: center; gap: 12px; font: 500 14px/1 var(--sans); cursor: pointer; background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+.isl-main { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.isl-main i { font-style: normal; font-weight: 400; color: var(--text-secondary); }
+.isl-clock { margin-left: auto; padding-left: 20px; font: 400 13px/1 var(--mono); color: var(--text-secondary); }
+.isl-swap { animation: isl-swap var(--spring-d) var(--spring); }
+@keyframes isl-swap { from { opacity: 0; transform: translateY(6px); } }
+.isl-list { flex: 1; overflow: hidden; border-top: 1px solid var(--border-default); }
+.isl-row { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 12px; row-gap: 4px; padding: 10px 20px; border-bottom: 1px solid var(--border-default); opacity: 0; transform: translateY(8px); transition: opacity 0.25s ease-out calc(var(--i, 0) * 40ms), transform var(--spring-d) var(--spring) calc(var(--i, 0) * 40ms); }
+.isl.open .isl-row { opacity: 1; transform: none; }
+.isl-row .type { font: 600 14px/1.2 var(--sans); }
+.isl-row .clock { font: 400 12px/1.2 var(--mono); color: var(--text-secondary); align-self: center; }
+.isl-row .doing { grid-column: 2 / 4; font: 400 13px/1.3 var(--sans); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.isl-row.live .doing { color: var(--text-primary); }
+.isl-row.over .type, .isl-row.over .doing { color: var(--text-tertiary); }
+.isl-foot { flex: none; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; font: 400 12px/1.33 var(--sans); color: var(--text-secondary); }
+.isl-open { font: 500 12px/1.33 var(--sans); color: var(--text-primary); cursor: pointer; }
+.isl:not(.open) .isl-list, .isl:not(.open) .isl-foot { display: none; }
+
+@media (hover: hover) and (pointer: fine) {
+  .ghost:hover { border-color: var(--border-active); background: rgba(255, 255, 255, 0.03); }
+  .lane:not(.sel):hover { background: rgba(255, 255, 255, 0.018); }
+  .isl-pill:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; transition-delay: 0s !important; }
+}
+</style>
+</head>
+<body>
+<div class="ambient" aria-hidden="true"></div>
+<div class="app" id="app">
+  <header class="head">
+    <div class="id"><h1>Agents</h1><p class="sub" id="sub">Waiting for the session</p></div>
+    <div class="metrics">
+      <div class="metric"><div class="value live" id="mRun"></div><span class="label">Running</span></div>
+      <div class="metric"><div class="value" id="mDone"></div><span class="label">Done</span></div>
+      <div class="metric"><div class="value" id="mTools"></div><span class="label">Tool calls</span></div>
+      <div class="metric"><div class="value" id="mTime"></div><span class="label">Elapsed</span></div>
+      <button class="ghost" id="float" type="button">Float on top</button>
+    </div>
+  </header>
+  <section class="timeline" id="timeline" aria-label="Timeline of each agent's tool calls">
+    <div class="axis"><span class="label">Agent</span><div class="ticks" id="ticks"><span class="now" id="nowlabel"></span></div></div>
+    <div class="lanes" id="lanes">
+      <div class="plate" id="plate"></div>
+      <div class="grid" id="grid" aria-hidden="true"><i class="nowline" id="nowline"></i></div>
+      <p class="empty" id="empty">No agents yet. Start some in Claude Code and they appear here.</p>
+    </div>
+  </section>
+  <section class="detail" id="detail">
+    <div class="log">
+      <span class="label">Selected</span>
+      <h2 id="dTitle"><b id="dType"></b><span id="dTask"></span></h2>
+      <div class="rows" id="rows"><p class="none" id="noRows"></p></div>
+    </div>
+    <aside>
+      <span class="label">This agent</span>
+      <div class="facts">
+        <div><div class="value" id="fTools"></div><span class="label">Tools</span></div>
+        <div><div class="value" id="fTokens"></div><span class="label">Tokens</span></div>
+        <div><div class="value" id="fClock"></div><span class="label" id="fClockLabel">Running</span></div>
+      </div>
+      <span class="label">Result</span>
+      <p class="result" id="result"></p>
+    </aside>
+  </section>
+</div>
+<div class="frame" id="frame" aria-hidden="true"></div>
+<button class="dock" id="dock" type="button" hidden><span class="mark" id="dockMark" data-s="running"><span class="dot"></span><span class="chk">&#10003;</span></span><span id="dockMain"></span><span class="hint">Floating on top. Click to bring it back.</span></button>
+<div class="tip" id="tip" role="tooltip"></div>
+<script src="motion.js"></script>
+<script>
+(() => {
+  'use strict'
+
+  // --- What this page is ----------------------------------------------------
+  // A local window that only watches. The mod writes one small data file and
+  // this page re-reads it; nothing here can reach Claude or the network.
+  const SID_TOKEN = '__AW_SID__'
+  const SID = SID_TOKEN.startsWith('__AW')
+    ? new URLSearchParams(location.search).get('s') || 'demo'
+    : SID_TOKEN
+  const IS_ISLAND = location.hash === '#island'
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  const LANE_H = 62
+  const ROW_H = 33
+  /** Bars are laid out at this many pixels a second, then scaled as one layer. */
+  const BASE = 10
+  /** The clock sits at this share of the track; the past draws in behind it. */
+  const FILL = 0.9
+  const MIN_SPAN = 60
+  /** With no word from the session for this long, an agent "at work" is not. */
+  const STALE_MS = 9000
+  const NOTICE_MS = 6000
+
+  // --- Motion ---------------------------------------------------------------
+  // Motion's springs keep their velocity when they are interrupted. Without it
+  // (reduced motion, or the file missing) every change lands at once instead.
+  function still() {
+    const done = Promise.resolve()
+    const value = start => {
+      let held = start
+      const heard = []
+      return {
+        get: () => held,
+        set(next) { held = next; heard.forEach(fn => fn(held)) },
+        jump(next) { this.set(next) },
+        on(_, fn) { heard.push(fn); return () => {} },
+      }
+    }
+    return {
+      motionValue: value,
+      springValue: value,
+      stagger: () => 0,
+      animate(target, to, options) {
+        const last = v => (Array.isArray(v) ? v[v.length - 1] : v)
+        if (target && typeof target.set === 'function') target.set(last(to))
+        else if (typeof target === 'number') options?.onUpdate?.(last(to))
+        else {
+          const list = typeof target === 'string' ? document.querySelectorAll(target) : [target]
+          for (const node of list) if (to.opacity !== undefined) node.style.opacity = String(last(to.opacity))
+        }
+        return { stop() {}, finished: done, then: (ok, no) => done.then(ok, no) }
+      },
+    }
+  }
+  const M = !RM && window.Motion ? window.Motion : still()
+  /** Rows and lanes: weight, and all but no bounce. */
+  const SPRING = { type: 'spring', stiffness: 420, damping: 38 }
+  /** Small things: quick, one soft overshoot. */
+  const SNAP = { type: 'spring', stiffness: 600, damping: 36 }
+  /** A bar landing on its true length. */
+  const SETTLE = { type: 'spring', stiffness: 520, damping: 26 }
+  /** The window drawing in to the island: the heaviest thing here. */
+  const HEAVY = { type: 'spring', stiffness: 260, damping: 30 }
+
+  const after = (animation, fn) => {
+    const done = animation && animation.finished ? animation.finished : Promise.resolve()
+    done.then(fn, fn)
+  }
+  const later = (ms, fn) => (RM ? fn() : setTimeout(fn, ms))
+
+  /** A spring sampled into a CSS easing, so plain transitions move like the rest. */
+  function springEase(stiffness, damping) {
+    let x = 0, v = 0, t = 0
+    const dt = 1 / 240, points = []
+    while (t < 2.5) {
+      v += (-stiffness * (x - 1) - damping * v) * dt
+      x += v * dt
+      t += dt
+      points.push(x)
+      if (Math.abs(x - 1) < 0.0006 && Math.abs(v) < 0.006) break
+    }
+    const step = Math.max(1, Math.floor(points.length / 36))
+    const kept = ['0']
+    for (let i = step - 1; i < points.length; i += step) kept.push(String(+points[i].toFixed(4)))
+    kept.push('1')
+    return { seconds: t, css: `linear(${kept.join(',')})` }
+  }
+  const ease = springEase(SPRING.stiffness, SPRING.damping)
+  if (CSS.supports('transition-timing-function', 'linear(0, 1)')) {
+    document.documentElement.style.setProperty('--spring', ease.css)
+    document.documentElement.style.setProperty('--spring-d', `${ease.seconds.toFixed(2)}s`)
+  }
+
+  // --- Small helpers --------------------------------------------------------
+  const $ = id => document.getElementById(id)
+  const el = (tag, cls, text, doc = document) => {
+    const node = doc.createElement(tag)
+    if (cls) node.className = cls
+    if (text !== undefined) node.textContent = text
+    return node
+  }
+  const pad = n => String(n).padStart(2, '0')
+  function clock(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000))
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60)
+    return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`
+  }
+  function dur(ms) {
+    const s = Math.max(0, ms) / 1000
+    if (s < 0.05) return '<0.1s'
+    if (s < 10) return `${s.toFixed(1)}s`
+    if (s < 60) return `${Math.floor(s)}s`
+    return `${Math.floor(s / 60)}m ${pad(Math.floor(s % 60))}s`
+  }
+  const amount = n => (n < 1000 ? String(n) : n < 1e6 ? `${(n / 1000).toFixed(n < 1e4 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`)
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+  const LIVE = new Set(['pending', 'running', 'waiting', 'idle'])
+  const BUSY = new Set(['pending', 'running', 'waiting'])
+  const isLive = a => LIVE.has(a.state)
+  const ENDED = { completed: 'finished', failed: 'failed', killed: 'stopped' }
+  /** What an agent is doing, in the words of its newest call. */
+  function doing(a) {
+    if (!isLive(a)) return a.summary || (a.state === 'completed' ? 'Finished' : a.state === 'failed' ? 'Failed' : 'Stopped')
+    const flying = a.calls.filter(c => c.end === undefined).pop()
+    if (flying) return flying.doing
+    if (a.state === 'waiting') return 'Waiting on background work or approval'
+    if (a.state === 'idle') return 'Idle until a message wakes it'
+    const last = a.calls[a.calls.length - 1]
+    return last ? last.did : 'Starting'
+  }
+
+  /** A number or a clock that rolls: only the digits that changed move. */
+  class Roll {
+    constructor(host) { this.host = host; this.text = ''; host.classList.add('roll') }
+    set(value, isQuiet) {
+      const text = String(value)
+      if (text === this.text) return
+      const old = this.text, host = this.host
+      const up = Number.parseFloat(text) < Number.parseFloat(old) ? -1 : 1
+      this.text = text
+      while (host.children.length < text.length) host.prepend(el('span', 'slot'))
+      while (host.children.length > text.length) host.firstChild.remove()
+      const shift = text.length - old.length
+      Array.from(host.children).forEach((slot, i) => {
+        const prev = slot.lastElementChild
+        if (prev && text[i] === old[i - shift]) return
+        const glyph = el('span', 'glyph', text[i])
+        slot.append(glyph)
+        if (!prev) return
+        if (isQuiet || old === '') { prev.remove(); return }
+        prev.classList.add('out')
+        after(M.animate(prev, { y: -9 * up, opacity: 0 }, { duration: 0.14, ease: 'easeOut' }), () => prev.remove())
+        M.animate(glyph, { y: [9 * up, 0], opacity: [0, 1] }, SNAP)
+      })
+    }
+  }
+
+  // --- State ----------------------------------------------------------------
+  let data = null
+  let stamp = 0
+  let t0 = 0
+  let isLoading = true
+  let isStale = false
+  /** id → what the page keeps for one agent's lane. */
+  const views = new Map()
+  /** In-flight bars: the only ones that change every frame. */
+  const flying = new Set()
+  let selected = null
+  let island = null
+  let pip = null
+  let notice = null
+
+  const nowMs = () => {
+    if (!data) return Date.now()
+    if (isStale) return data.beatAt
+    if (data.agents.some(isLive)) return Date.now()
+    return Math.max(t0, ...data.agents.map(a => a.endedAt || a.seenAt || t0))
+  }
+
+  // --- Reading the session --------------------------------------------------
+  // The file may be read while the mod is halfway through writing it. That
+  // read is thrown away (the next one, a moment later, is whole), so the
+  // parse error it raises is not left in the console as if something broke.
+  window.addEventListener('error', event => {
+    if (event.filename && event.filename.includes(`/${SID}.js`)) event.preventDefault()
+  })
+  let pollTimer = 0, pollHost = window
+  function poll() {
+    const tag = document.createElement('script')
+    tag.src = `${SID}.js?t=${Date.now()}`
+    tag.onload = () => {
+      tag.remove()
+      const next = window.__AGENT_WATCH__
+      if (next && next.v === 1 && next.beatAt !== stamp) { stamp = next.beatAt; ingest(next) }
+      watchPulse()
+    }
+    tag.onerror = () => { tag.remove(); watchPulse() }
+    document.head.append(tag)
+  }
+  /** Timers follow the window in sight: a covered window's own are slowed. */
+  function startPolling(host) {
+    pollHost.clearInterval(pollTimer)
+    pollHost = host
+    pollTimer = host.setInterval(() => { poll(); if (island) drawIsland() }, 250)
+    poll()
+  }
+  function watchPulse() {
+    const stale = !!data && data.agents.some(isLive) && Date.now() - data.beatAt > STALE_MS
+    if (stale === isStale) return
+    isStale = stale
+    if (!IS_ISLAND) { drawHead(); kick() }
+  }
+
+  function ingest(next) {
+    // A call left open by an agent that has ended closed when the agent did.
+    for (const a of next.agents) {
+      if (isLive(a)) continue
+      for (const c of a.calls) if (c.end === undefined) c.end = a.endedAt || a.seenAt || c.at
+    }
+    const before = data
+    data = next
+    if (before) {
+      for (const a of next.agents) {
+        const was = before.agents.find(o => o.id === a.id)
+        if (was && isLive(was) && !isLive(a)) notice = { id: a.id, until: Date.now() + NOTICE_MS }
+      }
+    }
+    if (IS_ISLAND) { t0 = next.session.startedAt; drawIsland(); return }
+    if (next.session.startedAt !== t0) reset(next.session.startedAt)
+    const seen = new Set()
+    next.agents.forEach((a, i) => {
+      seen.add(a.id)
+      const view = views.get(a.id) || mountLane(a, i)
+      updateLane(view, a)
+    })
+    for (const [id, view] of views) if (!seen.has(id)) unmountLane(view)
+    const wasOver = before ? new Set(before.agents.filter(a => !isLive(a)).map(a => a.id)) : new Set()
+    const ended = next.agents.some(a => !isLive(a) && before && !wasOver.has(a.id))
+    // An agent that just ended keeps its place a beat, then joins the finished.
+    if (ended) later(260, seatLanes); else seatLanes()
+    if (!selected && next.agents.length) select(next.agents[0].id, false)
+    later(ended ? 320 : 0, drawHead)
+    drawDetail(false)
+    if (island) drawIsland()
+    isLoading = false
+    kick()
+  }
+
+  // --- Lanes ----------------------------------------------------------------
+  const lanesEl = $('lanes'), plate = $('plate'), grid = $('grid'), ticksEl = $('ticks')
+  const nowline = $('nowline'), nowlabel = $('nowlabel')
+  const plateY = M.springValue(0, SPRING)
+  plateY.on('change', y => { plate.style.transform = `translate3d(0,${y}px,0)` })
+  const lanesH = M.springValue(LANE_H, SPRING)
+  lanesH.on('change', h => { lanesEl.style.height = `${h}px` })
+
+  function reset(start) {
+    t0 = start
+    for (const view of views.values()) view.root.remove()
+    views.clear()
+    flying.clear()
+    selected = null
+    isLoading = true
+  }
+
+  function mountLane(a, index) {
+    const root = el('div', 'lane'), inner = el('div', 'lane-in')
+    root.dataset.id = a.id
+    const who = el('button', 'who'), mark = el('span', 'mark')
+    who.type = 'button'
+    mark.append(el('span', 'dot'), el('span', 'chk', '✓'))
+    mark.style.setProperty('--phase', `-${Math.round(performance.now() % 2400)}ms`)
+    const type = el('span', 'type'), time = el('span', 'clock'), task = el('span', 'task')
+    who.append(mark, type, time, task)
+    const track = el('div', 'track'), life = el('span', 'life'), layer = el('div', 'layer'), liv = el('div', 'liv'), end = el('span', 'end')
+    track.append(life, layer, liv, end)
+    inner.append(who, track)
+    root.append(inner)
+    lanesEl.append(root)
+    const y = M.springValue(index * LANE_H, SPRING)
+    y.on('change', value => { root.style.transform = `translate3d(0,${value}px,0)` })
+    root.style.transform = `translate3d(0,${index * LANE_H}px,0)`
+    if (scale > 0) layer.style.transform = `scaleX(${scale / BASE})`
+    const view = { id: a.id, root, inner, who, mark, type, task, life, layer, liv, end, y, a: null, index, bars: new Map(), trackEnds: [], clock: new Roll(time) }
+    root.addEventListener('click', event => select(a.id, event.detail > 0))
+    // Lanes arrive one after another, never all at once.
+    M.animate(inner, { opacity: [0, 1], x: [-14, 0] }, { ...SPRING, delay: isLoading ? 0.12 + index * 0.05 : 0.06 })
+    views.set(a.id, view)
+    return view
+  }
+
+  function unmountLane(view) {
+    views.delete(view.id)
+    for (const bar of view.bars.values()) flying.delete(bar)
+    if (selected === view.id) selected = null
+    after(M.animate(view.inner, { opacity: 0 }, { duration: 0.16 }), () => view.root.remove())
+  }
+
+  /** Each lane's seat: the order the session gives, live first. */
+  function seatLanes() {
+    if (!data) return
+    data.agents.forEach((a, i) => {
+      const view = views.get(a.id)
+      if (!view) return
+      view.index = i
+      view.y.set(i * LANE_H)
+      if (a.id === selected) plateY.set(i * LANE_H)
+    })
+    lanesH.set(Math.max(1, data.agents.length) * LANE_H)
+    lanesEl.classList.toggle('has', data.agents.length > 0)
+  }
+
+  function updateLane(view, a) {
+    const was = view.a
+    view.a = a
+    if (!was || was.type !== a.type) view.type.textContent = a.type
+    if (!was || was.task !== a.task) { view.task.textContent = a.task; view.task.title = a.task }
+    if (!was || was.depth !== a.depth) view.who.style.paddingLeft = `${12 + Math.min(a.depth || 0, 3) * 14}px`
+    const live = isLive(a)
+    const settleState = () => {
+      view.root.classList.toggle('over', !live)
+      view.root.classList.toggle('failed', a.state === 'failed' || a.state === 'killed')
+      view.mark.dataset.s = a.state
+    }
+    // Ending is a sequence: the bar lands, then the mark turns, then the lane dims.
+    if (was && isLive(was) && !live) later(90, settleState); else settleState()
+    view.end.textContent = live ? '' : `✓ ${ENDED[a.state] || 'finished'} · ${plural(a.tools, 'tool')}`
+    view.who.setAttribute('aria-label', `${a.type}, ${a.task}, ${a.state}`)
+    syncCalls(view, a)
+  }
+
+  /** The first sub-track whose last call is over by the time this one starts. */
+  function trackFor(view, call) {
+    let k = view.trackEnds.findIndex(end => end <= call.at)
+    if (k === -1) k = view.trackEnds.length
+    view.trackEnds[k] = call.end === undefined ? Infinity : call.end
+    return Math.min(k, 2)
+  }
+
+  function staticBar(view, call, k) {
+    const node = el('i', call.isFailed ? 'bar bad' : 'bar')
+    node.dataset.k = String(k)
+    node.dataset.key = call.key
+    node.style.left = `${((call.at - t0) / 1000) * BASE}px`
+    node.style.width = `${Math.max(0.15 * BASE, ((call.end - call.at) / 1000) * BASE)}px`
+    view.layer.append(node)
+    return node
+  }
+
+  function addBar(view, call) {
+    const k = trackFor(view, call)
+    if (call.end !== undefined) {
+      const node = staticBar(view, call, k)
+      // A call too short to be seen in flight still arrives, it does not pop.
+      if (!isLoading) M.animate(node, { opacity: [0, 1], scaleX: [0.4, 1] }, SNAP)
+      return { node, call, k, isFlying: false }
+    }
+    const node = el('span', 'fly')
+    node.dataset.k = String(k)
+    node.dataset.key = call.key
+    node.append(el('span', 'lbl', call.doing))
+    view.liv.append(node)
+    const bar = { node, call, k, isFlying: true, isSettling: false, width: 0, need: call.doing.length * 6.7 + 18, isWide: false }
+    flying.add(bar)
+    M.animate(node, { opacity: [0, 1] }, { duration: 0.18 })
+    return bar
+  }
+
+  /**
+   * A call ended. Its bar was growing at the clock's own speed, and the page
+   * hears a moment late, so the bar carries that speed into a spring that
+   * lands on the true length. Then it joins the still bars.
+   */
+  function settle(view, bar, call) {
+    bar.isSettling = true
+    view.trackEnds[bar.k] = call.end
+    const target = Math.max(3, ((call.end - call.at) / 1000) * scale)
+    bar.node.classList.add('done')
+    if (call.isFailed) bar.node.classList.add('bad')
+    const width = M.motionValue(bar.width || target)
+    width.on('change', px => { bar.node.style.width = `${Math.max(2, px)}px` })
+    after(M.animate(width, target, { ...SETTLE, velocity: scale }), () => {
+      flying.delete(bar)
+      bar.node.remove()
+      if (view.bars.get(call.key) !== bar) return
+      view.bars.set(call.key, { node: staticBar(view, call, bar.k), call, k: bar.k, isFlying: false })
+    })
+  }
+
+  function syncCalls(view, a) {
+    const held = new Set()
+    for (const call of a.calls) {
+      held.add(call.key)
+      let bar = view.bars.get(call.key)
+      if (!bar) { bar = addBar(view, call); view.bars.set(call.key, bar) }
+      else if (bar.isFlying && !bar.isSettling && call.end !== undefined) settle(view, bar, call)
+      bar.call = call
+    }
+    for (const [key, bar] of view.bars) {
+      if (held.has(key)) continue
+      flying.delete(bar)
+      bar.node.remove()
+      view.bars.delete(key)
+    }
+    const tracks = Math.min(3, Math.max(1, view.trackEnds.length))
+    for (const n of [1, 2, 3]) view.root.classList.toggle(`t${n}`, n === tracks)
+    view.root.classList.toggle('busy', isLive(a) && a.calls.some(c => c.end === undefined))
+  }
+
+  // --- Time: the scale, the ticks, the frame --------------------------------
+  let trackW = 0
+  let scale = 0
+  let scaleRun = null
+  const scaleValue = M.motionValue(0)
+  scaleValue.on('change', value => { scale = value })
+  /** Time's own drift is followed as it is; only a jump (a resize) is sprung. */
+  function aimScale(target) {
+    if (scale === 0) { scaleValue.jump(target); return }
+    if (scaleRun) return
+    if (Math.abs(target - scale) / scale < 0.02) { scaleValue.jump(target); return }
+    scaleRun = M.animate(scaleValue, target, { type: 'spring', stiffness: 170, damping: 26 })
+    after(scaleRun, () => { scaleRun = null; kick() })
+  }
+
+  const STEPS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
+  const ticks = new Map()
+  let tickSign = ''
+  function seatTicks(span, elapsed) {
+    const step = STEPS.find(size => size * scale >= 92) || 7200
+    const last = Math.floor(span / step) * step
+    const sign = `${step}:${last}`
+    if (sign !== tickSign) {
+      tickSign = sign
+      const wanted = new Set()
+      for (let sec = 0; sec <= last; sec += step) {
+        wanted.add(sec)
+        if (ticks.has(sec)) continue
+        const label = el('span', '', clock(sec * 1000)), line = el('i')
+        ticksEl.append(label)
+        if (sec > 0) grid.append(line)
+        ticks.set(sec, { sec, label, line, isHidden: false })
+      }
+      for (const [sec, tick] of ticks) {
+        if (wanted.has(sec)) continue
+        ticks.delete(sec)
+        tick.label.classList.add('gone')
+        tick.line.classList.add('gone')
+        later(260, () => { tick.label.remove(); tick.line.remove() })
+      }
+    }
+    const nowX = elapsed * scale
+    for (const tick of ticks.values()) {
+      const x = tick.sec * scale
+      tick.label.style.transform = `translate3d(${x}px,0,0) translateX(-50%)`
+      tick.line.style.transform = `translate3d(${x}px,0,0)`
+      // A tick the clock is passing gives way to it.
+      const isHidden = elapsed > 3 && Math.abs(x - nowX) < 46
+      if (isHidden !== tick.isHidden) { tick.isHidden = isHidden; tick.label.classList.toggle('hid', isHidden) }
+    }
+    nowline.style.transform = `translate3d(${nowX}px,0,0)`
+    nowlabel.style.transform = `translate3d(${nowX}px,0,0) translateX(-50%)`
+  }
+
+  let raf = 0
+  let lastSecond = -1
+  let lastScale = -1
+  function frame() {
+    raf = 0
+    if (!data || !trackW) return
+    const now = nowMs()
+    const elapsed = Math.max(0, (now - t0) / 1000)
+    const span = Math.max(MIN_SPAN, elapsed / FILL)
+    aimScale(trackW / span)
+    if (scale !== lastScale) {
+      lastScale = scale
+      const squeeze = `scaleX(${scale / BASE})`
+      for (const view of views.values()) view.layer.style.transform = squeeze
+    }
+    seatTicks(span, elapsed)
+    for (const bar of flying) {
+      bar.node.style.transform = `translate3d(${((bar.call.at - t0) / 1000) * scale}px,0,0)`
+      if (bar.isSettling) continue
+      bar.width = Math.max(3, ((now - bar.call.at) / 1000) * scale)
+      bar.node.style.width = `${bar.width}px`
+      const isWide = bar.width > bar.need
+      if (isWide !== bar.isWide) { bar.isWide = isWide; bar.node.classList.toggle('wide', isWide) }
+    }
+    for (const view of views.values()) {
+      // The band under the calls: from the agent's start to now, or to its end.
+      const isOn = isLive(view.a)
+      const from = ((view.a.startedAt - t0) / 1000) * scale
+      const to = (((isOn ? now : view.a.endedAt || view.a.seenAt || now) - t0) / 1000) * scale
+      view.life.style.transform = `translate3d(${from}px,0,0) scaleX(${Math.max(2, to - from) / 200})`
+      if (!isOn) view.end.style.transform = `translate3d(${to + 10}px,0,0)`
+    }
+    const second = Math.floor(elapsed)
+    if (second !== lastSecond) { lastSecond = second; everySecond(now) }
+    if (isMoving()) kick()
+  }
+  const isMoving = () => !!data && (scaleRun !== null || (!isStale && (flying.size > 0 || data.agents.some(isLive))))
+  /** One frame is asked for; a still page asks for none. */
+  function kick() {
+    if (raf) return
+    raf = RM ? setTimeout(frame, 500) : requestAnimationFrame(frame)
+  }
+
+  function everySecond(now) {
+    nowlabel.textContent = clock(now - t0)
+    for (const view of views.values()) {
+      const a = view.a
+      view.clock.set(clock((isLive(a) ? now : a.endedAt || a.seenAt || now) - a.startedAt), isLoading)
+    }
+    rolls.time.set(clock(now - t0))
+    drawFacts(now)
+    for (const row of rowViews.values()) if (row.call.end === undefined) row.d.textContent = `${Math.floor((now - row.call.at) / 1000)}s`
+    if (tipBar) fillTip()
+  }
+
+  new ResizeObserver(() => {
+    const width = lanesEl.clientWidth - 300
+    if (width === trackW) return
+    trackW = Math.max(120, width)
+    kick()
+  }).observe(lanesEl)
+
+  // --- The header -----------------------------------------------------------
+  const rolls = { run: new Roll($('mRun')), done: new Roll($('mDone')), tools: new Roll($('mTools')), time: new Roll($('mTime')) }
+  function counts() {
+    const list = data ? data.agents : []
+    return {
+      run: list.filter(a => BUSY.has(a.state)).length,
+      idle: list.filter(a => a.state === 'idle').length,
+      done: list.filter(a => a.state === 'completed').length,
+      bad: list.filter(a => a.state === 'failed' || a.state === 'killed').length,
+      tools: list.reduce((sum, a) => sum + a.tools, 0),
+      tokens: list.reduce((sum, a) => sum + a.tokens, 0),
+      flights: list.filter(a => isLive(a) && a.calls.some(c => c.end === undefined)).length,
+    }
+  }
+  function drawHead() {
+    if (!data) return
+    const n = counts()
+    rolls.run.set(n.run)
+    rolls.done.set(n.done)
+    rolls.tools.set(n.tools)
+    rolls.time.set(clock(nowMs() - t0))
+    const started = new Date(t0)
+    const state = isStale ? 'not responding' : n.run + n.idle > 0 ? 'live' : data.agents.length ? 'finished' : 'waiting'
+    const stopped = n.bad ? ` · ${n.bad} stopped` : ''
+    $('sub').textContent = `${data.session.project} · started ${pad(started.getHours())}:${pad(started.getMinutes())} · ${state}${stopped}`
+    document.body.classList.toggle('working', !isStale && n.run > 0)
+    document.body.classList.toggle('busy', !isStale && n.flights > 0)
+    $('dockMain').textContent = headline(n)
+    $('dockMark').dataset.s = n.run > 0 ? 'running' : 'completed'
+    document.title = n.run > 0 ? `Agents · ${n.run} running` : 'Agents'
+  }
+  const headline = n => (n.run + n.done + n.bad === 0 ? 'No agents yet' : n.run > 0 ? `${n.run} running · ${n.done} done` : `All ${n.done + n.bad} done`)
+
+  // --- The detail sheet -----------------------------------------------------
+  const rowsEl = $('rows'), dTitle = $('dTitle'), dType = $('dType'), dTask = $('dTask'), resultEl = $('result')
+  const facts = { tools: new Roll($('fTools')), tokens: new Roll($('fTokens')), clock: new Roll($('fClock')) }
+  const rowViews = new Map()
+  let ghost = null
+  let resultSign = ''
+  const rowRoom = () => Math.max(3, Math.min(12, Math.floor(rowsEl.clientHeight / ROW_H)))
+
+  function setTitle(a) {
+    dType.textContent = a.type
+    dTask.textContent = ` · ${a.task}`
+  }
+
+  function select(id, isByHand) {
+    const view = views.get(id)
+    if (!view || selected === id) return
+    const had = selected
+    selected = id
+    for (const other of views.values()) other.root.classList.toggle('sel', other.id === id)
+    if (had === null) plateY.jump(view.index * LANE_H); else plateY.set(view.index * LANE_H)
+    plate.classList.add('on')
+    if (isByHand && had !== null && !RM) flyTitle(view); else setTitle(view.a)
+    drawDetail(true)
+  }
+
+  /**
+   * The lane's own name leaves its row and lands as the sheet's title: the
+   * same words, carried there, so the eye knows what the sheet is about.
+   */
+  function flyTitle(view) {
+    if (ghost) ghost.remove()
+    const from = view.type.getBoundingClientRect(), to = dType.getBoundingClientRect()
+    const node = el('div', 'ghost-title')
+    const tail = el('span', '', ` · ${view.a.task}`)
+    node.append(el('b', '', view.a.type), tail)
+    node.style.left = `${from.left}px`
+    node.style.top = `${from.top}px`
+    document.body.append(node)
+    ghost = node
+    dTitle.classList.add('swap')
+    M.animate(tail, { opacity: [0, 1] }, { duration: 0.25, delay: 0.08 })
+    const flight = M.animate(node, { x: [0, to.left - from.left], y: [0, to.top - from.top], scale: [1, 20 / 14] }, { type: 'spring', stiffness: 380, damping: 34 })
+    later(150, () => { if (ghost === node) setTitle(view.a) })
+    after(flight, () => {
+      if (ghost !== node) { node.remove(); return }
+      ghost = null
+      setTitle(view.a)
+      dTitle.classList.remove('swap')
+      after(M.animate(node, { opacity: 0 }, { duration: 0.14 }), () => node.remove())
+    })
+  }
+
+  function drawRows(isFresh) {
+    const view = views.get(selected)
+    if (!view) return
+    const calls = view.a.calls.slice(-rowRoom()).reverse()
+    const held = new Set(calls.map(c => c.key))
+    for (const [key, row] of rowViews) {
+      if (!isFresh && held.has(key)) continue
+      rowViews.delete(key)
+      row.node.classList.add('gone')
+      later(180, () => row.node.remove())
+    }
+    calls.forEach((call, i) => {
+      let row = rowViews.get(call.key)
+      if (!row) {
+        const node = el('div', 'row'), t = el('span', 't', clock(call.at - t0)), l = el('span', 'l'), d = el('span', 'd')
+        node.append(t, l, d)
+        rowsEl.append(node)
+        // A new call comes in from above while the older ones make room.
+        const y = M.springValue(isFresh ? i * ROW_H : i * ROW_H - 14, { stiffness: 480, damping: 40 })
+        y.on('change', value => { node.style.transform = `translate3d(0,${value}px,0)` })
+        node.style.transform = `translate3d(0,${y.get()}px,0)`
+        M.animate(node, { opacity: [0, 1] }, { duration: 0.22, delay: isFresh ? 0.16 + i * 0.035 : 0 })
+        row = { node, l, d, y, call }
+        rowViews.set(call.key, row)
+      }
+      row.call = call
+      row.y.set(i * ROW_H)
+      const isOpen = call.end === undefined
+      row.node.classList.toggle('open', isOpen)
+      row.l.textContent = isOpen ? call.doing : call.did
+      row.d.textContent = isOpen ? `${Math.floor(Math.max(0, nowMs() - call.at) / 1000)}s` : `${dur(call.end - call.at)}${call.isFailed ? ' · failed' : ''}`
+    })
+    $('noRows').textContent = calls.length ? '' : isLive(view.a) ? 'No tool calls yet.' : 'It made no tool calls.'
+  }
+
+  function drawFacts(now) {
+    const view = views.get(selected)
+    if (!view) return
+    const a = view.a
+    facts.tools.set(a.tools)
+    facts.tokens.set(amount(a.tokens))
+    facts.clock.set(clock((isLive(a) ? now : a.endedAt || a.seenAt || now) - a.startedAt))
+    $('fClockLabel').textContent = isLive(a) ? 'Running' : 'Ran'
+  }
+
+  function drawResult(isFresh) {
+    const view = views.get(selected)
+    if (!view) return
+    const a = view.a
+    const text = isLive(a)
+      ? 'Still working. Its answer lands here the moment it finishes.'
+      : a.result || a.summary || (a.state === 'completed' ? 'It finished without a written answer.' : a.state === 'failed' ? 'It failed before it could answer.' : 'It was stopped.')
+    const sign = `${a.id}:${text}`
+    if (sign === resultSign) return
+    const isArrival = resultSign.startsWith(`${a.id}:`) && !isLive(a)
+    resultSign = sign
+    resultEl.textContent = text
+    resultEl.classList.toggle('has', !isLive(a))
+    // The answer arriving is the last beat of an agent's ending.
+    if (isFresh || isArrival) M.animate(resultEl, { opacity: [0, 1], y: [10, 0] }, { ...SPRING, delay: isArrival ? 0.38 : 0.2 })
+  }
+
+  function drawDetail(isFresh) {
+    if (!views.has(selected)) return
+    if (!ghost) setTitle(views.get(selected).a)
+    drawRows(isFresh)
+    drawFacts(nowMs())
+    drawResult(isFresh)
+  }
+
+  // --- A bar under the pointer says what it was -----------------------------
+  const tip = $('tip')
+  const tipX = M.springValue(0, { stiffness: 620, damping: 42 }), tipY = M.springValue(0, { stiffness: 620, damping: 42 })
+  const seatTip = () => { tip.style.transform = `translate3d(${tipX.get()}px,${tipY.get()}px,0)` }
+  tipX.on('change', seatTip)
+  tipY.on('change', seatTip)
+  let tipBar = null
+  function fillTip() {
+    const call = tipBar.call
+    const open = call.end === undefined
+    tip.textContent = open ? call.doing : call.did
+    tip.append(el('b', '', ` · ${open ? `${Math.floor((nowMs() - call.at) / 1000)}s so far` : dur(call.end - call.at)}${call.isFailed ? ' · failed' : ''}`))
+  }
+  lanesEl.addEventListener('pointerover', event => {
+    const node = event.target.closest('.bar, .fly')
+    const view = node && views.get(node.closest('.lane').dataset.id)
+    const bar = view && view.bars.get(node.dataset.key)
+    if (!bar) return
+    const wasShown = tipBar !== null
+    tipBar = bar
+    fillTip()
+    const box = node.getBoundingClientRect()
+    const x = Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, box.left + box.width / 2 - tip.offsetWidth / 2))
+    const y = box.top - tip.offsetHeight - 9
+    // From one bar to the next it glides; from nowhere it is simply there.
+    if (wasShown) { tipX.set(x); tipY.set(y) } else { tipX.jump(x); tipY.jump(y) }
+    tip.classList.add('on')
+  })
+  lanesEl.addEventListener('pointerout', event => {
+    if (event.relatedTarget && event.relatedTarget.closest && event.relatedTarget.closest('.bar, .fly')) return
+    tipBar = null
+    tip.classList.remove('on')
+  })
+
+  // --- Floating: the window hands over to the island -------------------------
+  const app = $('app'), frameEl = $('frame'), dock = $('dock')
+  const morph = M.motionValue(0)
+  morph.on('change', p => {
+    const w = innerWidth, h = innerHeight
+    const left = ((w - 420) / 2) * p, top = ((h - 64) / 2) * p
+    const inset = `${top}px ${left}px ${top}px ${left}px`
+    app.style.clipPath = p < 0.002 ? '' : `inset(${inset} round 2px)`
+    app.style.opacity = String(Math.max(0, 1 - p * 2.6))
+    frameEl.style.inset = inset
+    frameEl.style.opacity = p < 0.002 ? '0' : '1'
+    dock.style.opacity = String(Math.max(0, Math.min(1, (p - 0.5) / 0.5)))
+    dock.style.transform = `scale(${0.94 + 0.06 * Math.min(1, Math.max(0, p))})`
+  })
+  function drawIn(isOut) {
+    dock.hidden = false
+    app.inert = isOut
+    after(M.animate(morph, isOut ? 1 : 0, HEAVY), () => { if (morph.get() < 0.01) dock.hidden = true })
+  }
+
+  function adoptStyles(doc) {
+    for (const sheet of document.styleSheets) {
+      try {
+        const style = doc.createElement('style')
+        style.textContent = Array.from(sheet.cssRules, rule => rule.cssText).join('\n')
+        doc.head.append(style)
+      } catch {
+        // A sheet on disk cannot be read as rules; it is linked instead.
+        const link = doc.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = sheet.href
+        doc.head.append(link)
+      }
+    }
+    doc.documentElement.style.cssText = document.documentElement.style.cssText
+    doc.title = 'Agents'
+  }
+
+  async function floatOut() {
+    if (pip) { pip.close(); return }
+    let win = null
+    try { win = await window.documentPictureInPicture.requestWindow({ width: 420, height: 64 }) } catch { win = null }
+    if (!win) {
+      // No always-on-top window in this browser: a small ordinary one instead.
+      window.open(`${location.href.split('#')[0]}#island`, 'agent-watch-island', 'popup,width=420,height=320')
+      return
+    }
+    pip = win
+    adoptStyles(win.document)
+    island = buildIsland(win.document, win)
+    drawIsland()
+    startPolling(win)
+    drawIn(true)
+    win.addEventListener('pagehide', () => {
+      pip = null
+      island = null
+      startPolling(window)
+      drawIn(false)
+      kick()
+    })
+  }
+
+  // --- The island -----------------------------------------------------------
+  function buildIsland(doc, win) {
+    doc.documentElement.classList.add('isl-doc')
+    doc.body.classList.add('isl-body')
+    const root = el('div', 'isl', undefined, doc)
+    const pill = el('button', 'isl-pill', undefined, doc), mark = el('span', 'mark', undefined, doc)
+    pill.type = 'button'
+    pill.setAttribute('aria-expanded', 'false')
+    mark.append(el('span', 'dot', undefined, doc), el('span', 'chk', '✓', doc))
+    const main = el('span', 'isl-main', undefined, doc), time = el('span', 'isl-clock', undefined, doc)
+    pill.append(mark, main, time)
+    const list = el('div', 'isl-list', undefined, doc), foot = el('div', 'isl-foot', undefined, doc)
+    const sum = el('span', '', undefined, doc), open = el('button', 'isl-open', 'Open the full view ↗', doc)
+    open.type = 'button'
+    foot.append(sum, open)
+    root.append(pill, list, foot)
+    doc.body.append(root)
+    const built = { doc, win, root, pill, mark, main, time, list, sum, rows: new Map(), isOpen: false, said: '' }
+    // The browser lets a floating window change size only on a click.
+    pill.addEventListener('click', () => {
+      built.isOpen = !built.isOpen
+      root.classList.toggle('open', built.isOpen)
+      pill.setAttribute('aria-expanded', String(built.isOpen))
+      const rows = data ? data.agents.length : 0
+      const chrome = win.outerHeight - win.innerHeight
+      try { win.resizeTo(win.outerWidth, chrome + (built.isOpen ? 64 + rows * 57 + 41 : 64)) } catch { /* the size stays; the list scrolls */ }
+    })
+    open.addEventListener('click', () => { window.focus(); if (pip) pip.close() })
+    return built
+  }
+
+  function drawIsland() {
+    if (!island || !data) return
+    const isl = island, doc = isl.doc, now = nowMs(), n = counts()
+    const told = notice && notice.until > Date.now() ? data.agents.find(a => a.id === notice.id) : null
+    // When an agent finishes, the line says so for a moment, then goes back.
+    const line = told ? `${told.type} ${ENDED[told.state] || 'finished'}` : headline(n)
+    const tail = told ? ` · ${plural(told.tools, 'tool')}` : ''
+    if (line + tail !== isl.said) {
+      isl.said = line + tail
+      isl.main.textContent = told ? line : n.run > 0 ? `${n.run} running` : line
+      isl.main.append(el('i', '', told ? tail : n.run > 0 ? ` · ${n.done} done` : '', doc))
+      isl.main.classList.remove('isl-swap')
+      void isl.main.offsetWidth
+      isl.main.classList.add('isl-swap')
+    }
+    isl.mark.dataset.s = told ? told.state : n.run > 0 ? 'running' : 'completed'
+    isl.time.textContent = clock(now - t0)
+    isl.sum.textContent = `${plural(n.tools, 'tool')} · ${amount(n.tokens)} tokens`
+    const held = new Set()
+    data.agents.forEach((a, i) => {
+      held.add(a.id)
+      let row = isl.rows.get(a.id)
+      if (!row) {
+        const node = el('div', 'isl-row', undefined, doc), mark = el('span', 'mark', undefined, doc)
+        mark.append(el('span', 'dot', undefined, doc), el('span', 'chk', '✓', doc))
+        const type = el('span', 'type', undefined, doc), time = el('span', 'clock', undefined, doc), text = el('span', 'doing', undefined, doc)
+        node.append(mark, type, time, text)
+        row = { node, mark, type, time, text }
+        isl.rows.set(a.id, row)
+      }
+      if (isl.list.children[i] !== row.node) isl.list.insertBefore(row.node, isl.list.children[i] || null)
+      row.node.style.setProperty('--i', String(i))
+      row.node.classList.toggle('live', isLive(a) && a.calls.some(c => c.end === undefined))
+      row.node.classList.toggle('over', !isLive(a))
+      row.mark.dataset.s = a.state
+      row.type.textContent = a.type
+      row.time.textContent = clock((isLive(a) ? now : a.endedAt || a.seenAt || now) - a.startedAt)
+      const text = doing(a)
+      if (row.text.textContent !== text) row.text.textContent = text
+    })
+    for (const [id, row] of isl.rows) if (!held.has(id)) { row.node.remove(); isl.rows.delete(id) }
+  }
+
+  // --- Start ----------------------------------------------------------------
+  if (IS_ISLAND) {
+    document.body.textContent = ''
+    island = buildIsland(document, window)
+    island.isOpen = true
+    island.root.classList.add('open')
+    startPolling(window)
+    return
+  }
+  $('float').addEventListener('click', floatOut)
+  dock.addEventListener('click', () => { if (pip) pip.close() })
+  // The page opens in order: the name, the numbers, then the lanes.
+  M.animate('.head .id', { opacity: [0, 1], y: [8, 0] }, SPRING)
+  M.animate('.metric, #float', { opacity: [0, 1], y: [10, 0] }, { ...SPRING, delay: M.stagger(0.05, { startDelay: 0.08 }) })
+  M.animate('#detail', { opacity: [0, 1], y: [16, 0] }, { ...SPRING, delay: 0.22 })
+  startPolling(window)
+})()
+</script>
+</body>
+</html>

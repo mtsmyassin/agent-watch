@@ -2,5 +2,13 @@
   "name": "agent-watch",
   "version": "0.1.0",
   "description": "A live pane of what every agent in the session is working on right now.",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "autoOpenWindow": {
+      "type": "boolean",
+      "title": "Open the agents window by itself",
+      "description": "Opens the agents window in a browser the first time two or more agents are working in a session. Off, the window opens only when you type /agent-watch gui.",
+      "default": false
+    }
+  }
 }

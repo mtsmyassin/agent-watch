@@ -24,7 +24,23 @@ import {
   unpathed,
 } from '../hooks/roster'
 import type { Sight } from '../hooks/roster'
-import type { AgentRow } from '../types'
+import {
+  began,
+  CALL_CAP,
+  called,
+  dataFile,
+  filed,
+  finished,
+  isSid,
+  kept,
+  minted,
+  pageUrl,
+  payload,
+  RESULT_MAX,
+  resulted,
+} from '../hooks/trail'
+import type { Trails } from '../hooks/trail'
+import type { AgentRow, Payload } from '../types'
 
 const PLUGIN = 'agent-watch'
 const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
@@ -1448,4 +1464,776 @@ test('a child agent sits in under its parent without breaking the columns', () =
 
 test("the mod's clock is the real one", () => {
   expect(Date.now()).toBeGreaterThan(1_700_000_000_000)
+})
+
+// --- An agent's trail, with no engine under it ------------------------------
+
+/** How the data file opens: the one value the page reads. */
+const LEAD = 'window.__AGENT_WATCH__ = '
+
+test("an agent's calls are kept with their start, their end and how they went", () => {
+  const read = called('k1', 'Reading notes.txt', 100)
+  const run = called('k2', 'Running pytest -x', 200)
+  let held: Trails = began(began({}, 'a1', read), 'a1', run)
+
+  expect(read).toEqual({
+    key: 'k1',
+    doing: 'Reading notes.txt',
+    did: 'Read notes.txt',
+    at: 100,
+  })
+  // In flight, a call has no end yet.
+  expect(held.a1?.calls).toEqual([read, run])
+
+  held = finished(held, 'a1', 'k1', 150, false)
+  held = finished(held, 'a1', 'k2', 900, true)
+
+  expect(held.a1?.calls).toEqual([
+    { ...read, end: 150 },
+    { ...run, end: 900, isFailed: true },
+  ])
+  expect(held.a1?.dropped).toBe(0)
+  // A call nobody began, another agent's, or one already over changes nothing.
+  expect(finished(held, 'a1', 'k9', 950, false)).toBe(held)
+  expect(finished(held, 'b2', 'k1', 950, false)).toBe(held)
+  expect(finished(held, 'a1', 'k1', 950, true)).toBe(held)
+})
+
+test('past 200 calls the oldest are let go, and counted', () => {
+  let held: Trails = {}
+
+  for (let i = 0; i < CALL_CAP + 5; i += 1) {
+    held = began(held, 'a1', called(`k${i}`, 'Reading notes.txt', i))
+  }
+
+  expect(CALL_CAP).toBe(200)
+  expect(held.a1?.calls.length).toBe(200)
+  expect(held.a1?.dropped).toBe(5)
+  expect(held.a1?.calls[0]?.key).toBe('k5')
+  expect(held.a1?.calls.at(-1)?.key).toBe('k204')
+  // The end of a call already let go changes nothing.
+  expect(finished(held, 'a1', 'k0', 999, false)).toBe(held)
+})
+
+test('the result an agent ended with is kept, masked and cut to about 600 letters', () => {
+  // Built here, never written out, so no scanner of this file meets one.
+  const key = 'aB3dE6gH9j'.repeat(4)
+  const answer =
+    `## Result\nThe report is in C:\\Users\\me\\AppData\\Local\\Temp\\job\\report.md and the key ${key} was used. ` +
+    'Each module was read in turn and checked against the list. '.repeat(20)
+  const result = summarized(answer, RESULT_MAX)
+
+  expect(RESULT_MAX).toBe(600)
+  expect(
+    result.startsWith('Result The report is in report.md and the key *** was used. Each'),
+  ).toBe(true)
+  expect(result.length).toBeLessThanOrEqual(600)
+  expect(result.length).toBeGreaterThan(500)
+  expect(result.endsWith('…')).toBe(true)
+  expect(result).not.toContain(key)
+  expect(result).not.toContain('Users')
+  // The row's own line is the same answer, cut short as before.
+  expect(summarized(answer).length).toBeLessThanOrEqual(80)
+
+  const held = resulted(began({}, 'a1', called('k1', 'Reading notes.txt', 1)), 'a1', result)
+
+  expect(held.a1?.result).toBe(result)
+  expect(held.a1?.calls.length).toBe(1)
+  // A turn that ends with nothing to say clears what the last one left.
+  expect(resulted(held, 'a1', '').a1).toEqual({ calls: held.a1?.calls, dropped: 0 })
+  expect('result' in (resulted(held, 'a1', '').a1 ?? {})).toBe(false)
+  expect(resulted({}, 'a1', '')).toEqual({})
+})
+
+test('a trail goes when its agent does', () => {
+  const held: Trails = {
+    a1: { calls: [], dropped: 0 },
+    a2: { calls: [], dropped: 2 },
+  }
+
+  expect(kept(held, ['a2', 'a3'])).toEqual({ a2: { calls: [], dropped: 2 } })
+  // Nothing to let go: the same trails back, so nothing is written.
+  expect(kept(held, ['a1', 'a2'])).toBe(held)
+})
+
+test("the page is handed every agent in the pane's order, each with its calls", () => {
+  const rows = [
+    born('done', 1000, {
+      type: 'Plan',
+      description: 'Plan it',
+      state: 'completed',
+      endedAt: 5000,
+      seenAt: 5000,
+      tools: 2,
+      tokens: 900,
+      answer: 'Three steps.',
+    }),
+    born('kid', 3000, { type: 'Explore', description: 'Read the diff', parentId: 'lead' }),
+    born('lead', 2000, { type: 'general-purpose', description: 'Run the review', tools: 1 }),
+  ]
+  const call = { ...called('k1', 'Reading notes.txt', 2100), end: 2300 }
+  const trails: Trails = {
+    lead: { calls: [call], dropped: 3 },
+    // An agent back at work has no answer: what its last turn said is not shown.
+    kid: { calls: [], dropped: 0, result: 'What an earlier turn said.' },
+    done: { calls: [], dropped: 0, result: 'Three steps, in order.' },
+  }
+  const data = payload({ id: 'abc123', cwd: 'C:\\work\\shop-site' }, rows, trails, 9000)
+
+  expect(data).toEqual({
+    v: 1,
+    session: { id: 'abc123', project: 'shop-site', startedAt: 1000 },
+    beatAt: 9000,
+    agents: [
+      {
+        id: 'lead',
+        type: 'General',
+        task: 'Run the review',
+        state: 'running',
+        depth: 0,
+        startedAt: 2000,
+        seenAt: 2000,
+        tools: 1,
+        tokens: 0,
+        dropped: 3,
+        calls: [call],
+      },
+      {
+        id: 'kid',
+        type: 'Explore',
+        task: 'Read the diff',
+        state: 'running',
+        depth: 1,
+        startedAt: 3000,
+        seenAt: 3000,
+        tools: 0,
+        tokens: 0,
+        dropped: 0,
+        calls: [],
+      },
+      {
+        id: 'done',
+        type: 'Plan',
+        task: 'Plan it',
+        state: 'completed',
+        depth: 0,
+        startedAt: 1000,
+        endedAt: 5000,
+        seenAt: 5000,
+        tools: 2,
+        tokens: 900,
+        summary: 'Three steps.',
+        result: 'Three steps, in order.',
+        dropped: 0,
+        calls: [],
+      },
+    ],
+  })
+  expect(data.agents.map(one => Object.keys(one).includes('result'))).toEqual([
+    false,
+    false,
+    true,
+  ])
+  // With no agent yet, the session starts when the page is written.
+  expect(payload({ id: 'abc123', cwd: '/home/me/app/' }, [], {}, 9000).session).toEqual({
+    id: 'abc123',
+    project: 'app',
+    startedAt: 9000,
+  })
+})
+
+test('the data file is one assignment, with no `<` for an answer to close a script by', () => {
+  const rows = [born('a1', 1000, { type: 'Explore', description: 'find </script><b> tags' })]
+  const data = payload({ id: 'abc123', cwd: '/work/site' }, rows, {}, 2000)
+  const text = dataFile(data)
+
+  expect(text.startsWith(`${LEAD}{"v":1,`)).toBe(true)
+  expect(text.endsWith('};\n')).toBe(true)
+  expect(text).not.toContain('<')
+  expect(text).toContain('find \\u003c/script>\\u003cb> tags')
+  // Read back as the page reads it, the words are whole again.
+  expect(JSON.parse(text.slice(LEAD.length, -2))).toEqual(data)
+})
+
+test('the page has a name of its own, a place under the home folder and a link', () => {
+  const rolls = [0, 0.5, 0.99, 0.28]
+  const name = minted(1_800_000_000_000, () => rolls.shift() ?? 0)
+
+  expect(name).toBe(`${(1_800_000_000_000).toString(36)}0iza`)
+  expect(isSid(name)).toBe(true)
+  // Nothing that could leave the folder is taken for a name.
+  expect(isSid('../../x')).toBe(false)
+  expect(isSid('')).toBe(false)
+  expect(isSid(undefined)).toBe(false)
+  // The home folder's own slashes, so the path reads as the system says it.
+  expect(filed('C:\\Users\\me', 'abc.html')).toBe(
+    'C:\\Users\\me\\.claude\\agent-watch\\abc.html',
+  )
+  expect(filed('/home/me/', 'abc.html')).toBe('/home/me/.claude/agent-watch/abc.html')
+  expect(pageUrl('C:\\Users\\me\\.claude\\agent-watch\\abc.html')).toBe(
+    'file:///C:/Users/me/.claude/agent-watch/abc.html',
+  )
+  expect(pageUrl('/home/me/.claude/agent-watch/abc.html')).toBe(
+    'file:///home/me/.claude/agent-watch/abc.html',
+  )
+  // A space, and the marks a link or a command line would read as its own.
+  expect(pageUrl('C:\\Users\\R&D Lab #2\\abc.html')).toBe(
+    'file:///C:/Users/R%26D%20Lab%20%232/abc.html',
+  )
+})
+
+// --- The window: the page, its data file and the browser --------------------
+
+/** The home folder the window's files go under, and the system that names Edge. */
+const HOME = 'C:\\Users\\me'
+const WINDOWS = { USERPROFILE: HOME, OS: 'Windows_NT' } as const
+/** The page as the mod ships it; `$&` is what a careless replace would mangle. */
+const SHIPPED = {
+  'index.html': '<script src="__AW_SID__.js"></script><p>$& __AW_SID__</p>',
+  'fonts.css': '@font-face { font-family: Inter; }',
+  'motion.js': 'window.motion = 1',
+} as const
+const ASK_GUI = {
+  command: 'agent-watch',
+  args: 'gui',
+  origin: { kind: 'composer' },
+  presentation: { isFullscreen: true, columns: 160 },
+} as const
+
+/** The disk and the host beneath the mod: what it shipped, wrote and ran. */
+type Desk = {
+  /** The mod's own `gui` folder by file name; a name left out is a missing file. */
+  shipped: Readonly<Record<string, string>>
+  written: { path: string; text: string }[]
+  ran: (readonly string[])[]
+  /** False stands for a host where no command can be started. */
+  canRun: boolean
+  /** False stands for a disk that takes no write. */
+  canWrite: boolean
+}
+
+function desk(on: On, shipped: Readonly<Record<string, string>> = SHIPPED): Desk {
+  const d: Desk = { shipped, written: [], ran: [], canRun: true, canWrite: true }
+
+  on('fs.read', (_, e) => {
+    // However the engine spells the path, the file is one of the `gui` folder's.
+    const name = /[\\/]gui[\\/]([^\\/]+)$/.exec(e.path)?.[1] ?? ''
+    const text = Object.keys(d.shipped).includes(name) ? d.shipped[name] : undefined
+
+    return text === undefined
+      ? { deny: `ENOENT: no such file, open '${name}'` }
+      : { value: text }
+  })
+  on('fs.write', (_, e) => {
+    if (!d.canWrite) {
+      return { deny: 'EACCES: permission denied' }
+    }
+
+    d.written.push({ path: e.path, text: e.text })
+
+    return { value: undefined }
+  })
+  on('process.run', (_, e) => {
+    if (!d.canRun) {
+      return { deny: `spawn ${e.argv[0] ?? ''} ENOENT` }
+    }
+
+    d.ran.push(e.argv)
+
+    return {
+      value: {
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
+
+  return d
+}
+
+/** How many times the data file was written. */
+const beats = (d: Desk): number =>
+  d.written.filter(one => one.text.startsWith(LEAD)).length
+
+/** The data as the page would read it now: the newest write of the data file. */
+function dataOf(d: Desk): Payload {
+  const text = d.written.filter(one => one.text.startsWith(LEAD)).at(-1)?.text ?? ''
+
+  return JSON.parse(text.slice(LEAD.length, -2)) as Payload
+}
+
+/** The newest text written to a path. */
+const textAt = (d: Desk, path: string): string | undefined =>
+  d.written.filter(one => one.path === path).at(-1)?.text
+
+test('/agent-watch gui lays the page and its data, and opens one window', async ($, on) => {
+  const w = world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: {} }))
+
+  await $.session.start({ ...SESSION, cwd: 'C:\\work\\shop-site' })
+  await $.agent.spawn(SPAWN)
+  await $.tool.call({ tool: 'Read', file_path: '/repo/notes.txt', agentId: 'a1' })
+  await clock.settle()
+  // Until it is asked for, nothing is written and nothing is run.
+  expect(d.written).toEqual([])
+
+  const ran = await $.command.run(ASK_GUI)
+  // The answer says the path with forward slashes: it is drawn as markdown,
+  // where a backslash before `.claude` would vanish.
+  const [headline = '', shown = ''] = (ran.text ?? '').split('\n')
+  const page = shown.split('/').join('\\')
+
+  expect(shown).not.toContain('\\')
+  const sid = page.slice(page.lastIndexOf('\\') + 1, -'.html'.length)
+  const folder = `${HOME}\\.claude\\agent-watch`
+
+  expect(headline).toBe('Agents window opened.')
+  expect(isSid(sid)).toBe(true)
+  expect(page).toBe(`${folder}\\${sid}.html`)
+  // The page knows its own data file by name, and nothing else in it moved.
+  expect(textAt(d, page)).toBe(`<script src="${sid}.js"></script><p>$& ${sid}</p>`)
+  expect(textAt(d, `${folder}\\fonts.css`)).toBe(SHIPPED['fonts.css'])
+  expect(textAt(d, `${folder}\\motion.js`)).toBe(SHIPPED['motion.js'])
+  expect(d.written.map(one => one.path).sort()).toEqual(
+    [page, `${folder}\\fonts.css`, `${folder}\\motion.js`, `${folder}\\${sid}.js`].sort(),
+  )
+
+  const data = dataOf(d)
+  const [agent] = data.agents
+
+  expect(data.v).toBe(1)
+  expect(data.session).toEqual({
+    id: sid,
+    project: 'shop-site',
+    startedAt: agent?.startedAt,
+  })
+  expect(agent?.type).toBe('Explore')
+  expect(agent?.task).toBe('find the auth flow')
+  expect(agent?.tools).toBe(1)
+  expect(agent?.calls.map(call => call.did)).toEqual(['Read notes.txt'])
+  expect(d.ran).toEqual([
+    [
+      'cmd',
+      '/c',
+      'start',
+      '',
+      'msedge',
+      `--app=file:///C:/Users/me/.claude/agent-watch/${sid}.html`,
+      '--window-size=1280,840',
+    ],
+  ])
+  // The pane is left as it stood: opened once by the spawn, never pinned here.
+  expect(w.opened).toBe(1)
+
+  // Asked for again, the same page is opened: the name is made once.
+  const again = await $.command.run(ASK_GUI)
+
+  expect(again.text).toBe(ran.text)
+  expect(d.ran.length).toBe(2)
+})
+
+test("an agent's calls reach the page with their end and their failure", async ($, on) => {
+  world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+
+  on('tool.call', (_, e) => {
+    if (e.tool === 'Bash') {
+      return { result: 'exit 1', isError: true }
+    }
+
+    if (e.tool === 'Grep') {
+      throw new Error('the tool broke')
+    }
+
+    return e.tool === 'Write' ? { deny: 'not in this folder' } : { result: {} }
+  })
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await $.tool.call({ tool: 'Read', file_path: '/repo/notes.txt', agentId: 'a1' })
+  await $.tool.call({ tool: 'Bash', command: 'pytest -x', agentId: 'a1' })
+  await $.tool.call({ tool: 'Write', file_path: '/repo/out.txt', content: 'x', agentId: 'a1' })
+  // A call that throws still ends, and the throw is still the caller's to see.
+  const thrown = await $.tool
+    .call({ tool: 'Grep', pattern: 'TODO', agentId: 'a1' })
+    .then(
+      () => 'answered',
+      () => 'thrown',
+    )
+
+  await clock.settle()
+  await $.command.run(ASK_GUI)
+
+  const calls = dataOf(d).agents[0]?.calls ?? []
+
+  expect(thrown).toBe('thrown')
+  expect(calls.map(call => [call.doing, call.did, call.isFailed === true])).toEqual([
+    ['Reading notes.txt', 'Read notes.txt', false],
+    ['Running pytest -x', 'Ran pytest -x', true],
+    ['Writing out.txt', 'Wrote out.txt', true],
+    ['Searching for TODO', 'Searched for TODO', true],
+  ])
+  expect(calls.every(call => call.end !== undefined && call.end >= call.at)).toBe(true)
+  // Each call goes by a key of its own.
+  expect(new Set(calls.map(call => call.key)).size).toBe(4)
+  expect(calls.every(call => call.key !== '')).toBe(true)
+})
+
+test('once the window is on, the data file is rewritten after every tool call', async ($, on) => {
+  world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: {} }))
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+  await $.command.run(ASK_GUI)
+
+  const before = beats(d)
+
+  expect(before).toBe(1)
+  expect(dataOf(d).agents[0]?.calls).toEqual([])
+
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await clock.settle()
+
+  expect(beats(d)).toBeGreaterThan(before)
+  expect(dataOf(d).agents[0]?.calls.map(call => call.did)).toEqual(['Ran ls'])
+  expect(dataOf(d).agents[0]?.tools).toBe(1)
+  // Only the data is written again: the page and its files were laid once.
+  expect(d.written.filter(one => !one.text.startsWith(LEAD)).length).toBe(3)
+  expect(d.ran.length).toBe(1)
+
+  // The answer reaches the page twice: a line for the row, and more of it.
+  const secret = ['hunter', '2'].join('')
+
+  await $.turn.complete({
+    ...DONE,
+    answer: `Login lives in C:\\repo\\auth\\session.py; token=${secret} was used. ${'It was traced step by step. '.repeat(40)}`,
+  })
+  await clock.settle()
+
+  const agent = dataOf(d).agents[0]
+
+  expect(agent?.state).toBe('completed')
+  expect(agent?.summary?.length).toBeLessThanOrEqual(80)
+  expect(agent?.result?.startsWith('Login lives in session.py; token=*** was used.')).toBe(true)
+  expect(agent?.result?.length).toBeGreaterThan(500)
+  expect(agent?.result?.length).toBeLessThanOrEqual(600)
+  expect(JSON.stringify(dataOf(d))).not.toContain(secret)
+})
+
+test('while an agent lives the data file gets a fresh beat, and none once it is done', async ($, on) => {
+  world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+  await $.command.run(ASK_GUI)
+
+  const quiet = beats(d)
+
+  // Nothing changes for ten seconds: the beat alone rewrites it, every other second.
+  await clock.advance(10_000)
+  expect(beats(d) - quiet).toBe(5)
+
+  await $.turn.complete(DONE)
+  await clock.settle()
+
+  const done = beats(d)
+
+  expect(dataOf(d).agents[0]?.state).toBe('completed')
+  await clock.advance(30_000)
+  expect(beats(d)).toBe(done)
+})
+
+test('a teammate that idles keeps the beat going until the roster says it left', async ($, on) => {
+  const w = world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+
+  await $.session.start(SESSION)
+  await $.agent.spawn({ ...SPAWN, isTeammate: true })
+  await clock.settle()
+  await $.command.run(ASK_GUI)
+  await $.turn.complete(DONE)
+  await clock.settle()
+  expect(dataOf(d).agents[0]?.state).toBe('idle')
+
+  // Long past the moment the pane steps aside, the page still gets its beat.
+  await clock.advance(60_000)
+
+  const idling = beats(d)
+
+  expect(w.closed).toBe(1)
+  await clock.advance(10_000)
+  expect(beats(d) - idling).toBe(5)
+  expect(w.closed).toBe(1)
+
+  // The teammate is shut down with no event of its own: the roster says so.
+  w.roster = [
+    { id: 'a1', description: 'find the auth flow', type: 'Explore', status: 'killed' },
+  ]
+  await clock.advance(6000)
+  expect(dataOf(d).agents[0]?.state).toBe('killed')
+
+  // Nobody lives: the beat stops, and so does the clock.
+  const still = beats(d)
+  const polls = w.polls
+
+  await clock.advance(60_000)
+  expect(beats(d)).toBe(still)
+  expect(w.polls).toBe(polls)
+})
+
+test('AGENT_WATCH_BROWSER=none lays the page and opens no window', async ($, on) => {
+  world(on, { ...WINDOWS, AGENT_WATCH_BROWSER: 'none' })
+  const d = desk(on)
+  const clock = mock.clock(on)
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+
+  const ran = await $.command.run(ASK_GUI)
+  // The answer says the path with forward slashes: it is drawn as markdown,
+  // where a backslash before `.claude` would vanish.
+  const [headline = '', shown = ''] = (ran.text ?? '').split('\n')
+  const page = shown.split('/').join('\\')
+
+  expect(shown).not.toContain('\\')
+
+  expect(headline).toBe('Agents window ready.')
+  expect(textAt(d, page)).toContain('<script src=')
+  expect(d.written.length).toBe(4)
+  expect(beats(d)).toBe(1)
+  expect(d.ran).toEqual([])
+})
+
+test('with no screen the page is laid for whoever opens it, and no window is opened', async ($, on) => {
+  world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+
+  const ran = await $.command.run(ASK_GUI)
+
+  expect(ran.text?.startsWith('Agents window ready.\n')).toBe(true)
+  expect(beats(d)).toBe(1)
+  expect(d.ran).toEqual([])
+})
+
+test('while the window is off nothing is written, and /agent-watch is as it was', async ($, on) => {
+  const w = world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: {} }))
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  w.nextId = 'a2'
+  await $.agent.spawn({ ...SPAWN, tool_use_id: 'toolu_2', description: 'write tests' })
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await clock.advance(10_000)
+
+  const opened = w.opened
+  const ran = await $.command.run({ ...ASK_GUI, args: '' })
+
+  await $.turn.complete(DONE)
+  await clock.advance(10_000)
+
+  // The plain command still reads the roster out and raises the pane.
+  expect(ran.text).toContain('2 working')
+  expect(ran.text).toContain('[running] Explore "find the auth flow"')
+  expect(ran.text).not.toContain('Agents window')
+  expect(w.opened).toBe(opened + 1)
+  // Two agents at work, and the option is off: nothing opens by itself.
+  expect(d.written).toEqual([])
+  expect(d.ran).toEqual([])
+})
+
+test('a missing page is said in plain words, and nothing is thrown or written', async ($, on) => {
+  const w = world(on, WINDOWS)
+  const d = desk(on, { 'fonts.css': SHIPPED['fonts.css'], 'motion.js': SHIPPED['motion.js'] })
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: {} }))
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+
+  const ran = await $.command.run(ASK_GUI)
+
+  expect(ran.text).toBe(
+    "Agents window not opened: the mod's gui/index.html could not be read.",
+  )
+
+  // With no page the window stays off: what follows writes nothing.
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await clock.advance(5000)
+  expect(d.written).toEqual([])
+  expect(d.ran).toEqual([])
+  expect(w.toasts).toEqual([])
+})
+
+test('a file that cannot be laid, or a browser that will not start, is said and not thrown', async ($, on) => {
+  world(on, WINDOWS)
+  const d = desk(on, { 'index.html': SHIPPED['index.html'], 'fonts.css': SHIPPED['fonts.css'] })
+  const clock = mock.clock(on)
+
+  d.canRun = false
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+
+  const ran = await $.command.run(ASK_GUI)
+  const lines = (ran.text ?? '').split('\n')
+
+  // The page itself is there, so it is fed, and its path is still given.
+  expect(lines[0]).toBe('Agents window ready.')
+  expect(lines[1]?.endsWith('.html')).toBe(true)
+  expect(lines.slice(2)).toEqual([
+    "The mod's gui/motion.js could not be read.",
+    'No browser could be started, so open the page by hand.',
+  ])
+  expect(beats(d)).toBe(1)
+})
+
+test('with nowhere to write the page, the answer says so and the window stays off', async ($, on) => {
+  world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: {} }))
+
+  d.canWrite = false
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+
+  const text = (await $.command.run(ASK_GUI)).text ?? ''
+
+  expect(text.startsWith(`Agents window not opened: ${HOME}\\.claude\\agent-watch\\`)).toBe(true)
+  expect(text.endsWith('.html could not be written.')).toBe(true)
+  expect(text.split('\n').length).toBe(1)
+
+  // The disk is back, and still nothing is written: the window never came on.
+  d.canWrite = true
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await clock.settle()
+  expect(d.written).toEqual([])
+  expect(d.ran).toEqual([])
+})
+
+test('with no home folder set, the answer says so', async ($, on) => {
+  world(on)
+  const d = desk(on)
+  const clock = mock.clock(on)
+
+  await $.session.start(SESSION)
+  await clock.settle()
+
+  expect((await $.command.run(ASK_GUI)).text).toBe(
+    'Agents window not opened: no home folder is set (USERPROFILE or HOME).',
+  )
+  expect(d.written).toEqual([])
+  expect(d.ran).toEqual([])
+})
+
+test(
+  'asked to in the options, the window opens by itself once two agents are at work',
+  { options: { autoOpenWindow: true } },
+  async ($, on) => {
+    const w = world(on, WINDOWS)
+    const d = desk(on)
+    const clock = mock.clock(on)
+
+    await $.session.start(SESSION)
+    await $.agent.spawn(SPAWN)
+    await clock.settle()
+    // One agent is not yet a crowd.
+    expect(d.written).toEqual([])
+    expect(d.ran).toEqual([])
+
+    w.nextId = 'a2'
+    await $.agent.spawn({ ...SPAWN, tool_use_id: 'toolu_2', description: 'write tests' })
+    await clock.settle()
+
+    expect(d.ran.length).toBe(1)
+    expect(d.ran[0]?.slice(0, 5)).toEqual(['cmd', '/c', 'start', '', 'msedge'])
+    expect(dataOf(d).agents.map(one => one.task)).toEqual([
+      'find the auth flow',
+      'write tests',
+    ])
+
+    // A third agent, and time passing, open nothing more.
+    w.nextId = 'a3'
+    await $.agent.spawn({ ...SPAWN, tool_use_id: 'toolu_3', description: 'read the docs' })
+    await clock.advance(10_000)
+
+    expect(d.ran.length).toBe(1)
+    expect(dataOf(d).agents.length).toBe(3)
+    expect(w.toasts).toEqual([])
+  },
+)
+
+test('a window opened before a reload is still fed, under the same name', async ($, on) => {
+  world(on, WINDOWS)
+  const d = desk(on)
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: {} }))
+  // What the copy before the reload stored: the window on, and its name.
+  on('state.get', (_, e, next) =>
+    e.key === 'gui'
+      ? { value: { value: { sid: 'mfk2x9q4ab7z', isOn: true }, version: 1 } }
+      : next(e),
+  )
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await clock.settle()
+
+  expect(beats(d)).toBeGreaterThan(0)
+  expect(d.written.every(one => one.path === `${HOME}\\.claude\\agent-watch\\mfk2x9q4ab7z.js`)).toBe(
+    true,
+  )
+  expect(dataOf(d).session.id).toBe('mfk2x9q4ab7z')
+  // No page is laid again and no second window is opened.
+  expect(d.ran).toEqual([])
+})
+
+test('in a nested worker no trail is kept and no window can be opened', async ($, on) => {
+  world(on, { ...WINDOWS, DELTAO_NESTED_CLI: '1' })
+  const d = desk(on)
+  const clock = mock.clock(on)
+  let stored = 0
+
+  on('tool.call', () => ({ result: {} }))
+  on('state.set', (_, e, next) => {
+    stored += 1
+
+    return next(e)
+  })
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await $.turn.complete(DONE)
+  await clock.advance(10_000)
+
+  expect(stored).toBe(0)
+  expect(d.written).toEqual([])
+  expect(d.ran).toEqual([])
 })

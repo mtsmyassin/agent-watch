@@ -38,8 +38,80 @@ export type AgentRow = {
   answer?: string
 }
 
+/** One tool call of an agent, as its trail keeps it; the words are already redacted. */
+export type Call = {
+  /** The call's own id: what its end is matched to. */
+  key: string
+  /** The call while it runs, as a person says it: `Reading notes.txt`. */
+  doing: string
+  /** The same call once it is over: `Read notes.txt`. */
+  did: string
+  /** When it started. */
+  at: number
+  /** When it came back; absent while it is in flight. */
+  end?: number
+  /** Set when it threw, answered an error or was refused. */
+  isFailed?: true
+}
+
+/** What one agent did, call by call, and the longer result it ended with. */
+export type Trail = {
+  /** Its newest calls, oldest first, at most 200. */
+  calls: Call[]
+  /** How many older calls were let go to hold that cap. */
+  dropped: number
+  /** Its answer in about 600 letters: folder paths cut, already redacted. */
+  result?: string
+}
+
+/**
+ * What the window's page reads: the data file's one value. The page is a
+ * local file and cannot ask the mod anything, so all it shows is in here.
+ */
+export type Payload = {
+  v: 1
+  session: {
+    /** The name the mod gave this session's page and data file. */
+    id: string
+    /** The last folder of the session's working directory. */
+    project: string
+    /** When the first agent started; when written, where there is none. */
+    startedAt: number
+  }
+  /** When this was written: a page that sees it stand still has lost the session. */
+  beatAt: number
+  /** The agents in the order the pane lists them. */
+  agents: Array<{
+    id: string
+    /** The agent's type said short: `General`, `Explore`. */
+    type: string
+    task: string
+    state: AgentState
+    /** How deep under its parents it sits; 0 for one the main loop started. */
+    depth: number
+    startedAt: number
+    endedAt?: number
+    seenAt: number
+    tools: number
+    tokens: number
+    /** Its answer as one line of about 80 letters. */
+    summary?: string
+    /** Its answer in about 600 letters, while that answer stands. */
+    result?: string
+    dropped: number
+    calls: Call[]
+  }>
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'agent-watch': { agents: Shaped<AgentRow[]>; isDismissed: boolean }
+    'agent-watch': {
+      agents: Shaped<AgentRow[]>
+      isDismissed: boolean
+      /** Each agent's trail, by the agent's id. */
+      trail: Shaped<Record<string, Trail>>
+      /** The window's page: the name its files go by, and whether it is fed. */
+      gui: { sid: string; isOn: boolean }
+    }
   }
 }

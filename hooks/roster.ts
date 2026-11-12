@@ -232,7 +232,8 @@ const DRIVE_PATH =
 /** A rooted path of two folders or more; a link's own slashes are left alone. */
 const ROOT_PATH = /(?<![\w:/.~-])~?\/(?:[\w.@%+-]+\/)+([\w.@%+-]*)/g
 
-const lastFolder = (path: string): string =>
+/** The last name in a path: `C:\a\b` and `/a/b/` both read `b`. */
+export const lastFolder = (path: string): string =>
   path.split(/[\\/]+/).filter(part => part !== '').pop() ?? path
 
 /** Every full folder path in a text, down to its last name: `C:\a\b\c.txt` reads `c.txt`. */
@@ -558,18 +559,19 @@ const SUMMARY_MAX = 80
 /**
  * An agent's answer as one line of about 80 letters: its opening, with the
  * marks of a list or a heading dropped, folder paths cut to their last name,
- * and anything shaped like a credential masked.
+ * and anything shaped like a credential masked. `max` asks for a longer cut,
+ * and twice that much of the answer is then read, so the cut lands on a word.
  */
-export function summarized(answer: string): string {
+export function summarized(answer: string, max = SUMMARY_MAX): string {
   const flat = answer
-    .slice(0, SCANNED)
+    .slice(0, Math.max(SCANNED, max * 2))
     .replace(/```[\s\S]*?(?:```|$)/g, ' ')
     .replace(/^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+/gm, '')
     .replace(/[*`]+/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 
-  return clip(redact(unpathed(flat)), SUMMARY_MAX)
+  return clip(redact(unpathed(flat)), max)
 }
 
 /** A length of time as a person reads it: `42s`, `3m 05s`, `1h 12m`. */

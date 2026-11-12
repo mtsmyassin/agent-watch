@@ -17,10 +17,26 @@ import {
   rested,
   spawned,
   statusText,
+  summarized,
   synced,
   woke,
 } from './roster'
 import type { Span, Tone } from './roster'
+import {
+  began,
+  called,
+  dataFile,
+  filed,
+  finished,
+  isSid,
+  kept,
+  minted,
+  pageUrl,
+  payload,
+  RESULT_MAX,
+  resulted,
+} from './trail'
+import type { Trails } from './trail'
 
 const NAME = 'agent-watch'
 const PANE = 'agent-watch'
@@ -39,6 +55,17 @@ const SYNC_EVERY = 3
 const LINGER_TICKS = 15
 /** Ticks a pane the person asked for keeps redrawing, until each result line has closed. */
 const SETTLE_TICKS = 34
+/**
+ * Every second tick the window's data is rewritten while an agent lives,
+ * whatever changed: the beat its page tells a slow session from a lost one by.
+ */
+const BEAT_TICKS = 2
+/** Where the page's source says the session's own name goes. */
+const SID_TOKEN = '__AW_SID__'
+/** The page's other files, laid beside it under their own names. */
+const ASSETS = ['fonts.css', 'motion.js'] as const
+/** The window the page opens in, as Edge's app mode takes it. */
+const WINDOW_SIZE = '1280,840'
 
 // The DeltaO.ai palette (DESIGN.md): a near-void canvas and warm off-white
 // text in three strengths. Order is weight and brightness; the one accent,
@@ -77,6 +104,15 @@ const isDismissed = atom(
   { plugin: 'agent-watch', key: 'isDismissed' } as const,
   false,
 )
+// Each agent's calls are kept whether or not a window shows them: a window
+// opened late still has the whole run.
+const trails = atom({ plugin: 'agent-watch', key: 'trail' } as const, {}, {
+  shape: 'trail-1',
+})
+const gui = atom({ plugin: 'agent-watch', key: 'gui' } as const, {
+  sid: '',
+  isOn: false,
+})
 
 const clock = (): number => Date.now()
 
@@ -115,6 +151,25 @@ let queue: Promise<void> = Promise.resolve()
 /** Loops with a row, and loops in no roster (the engine's own) with when asked. */
 const heard = new Set<string>()
 const strangers = new Map<string, number>()
+/** Where the session runs; its last folder names the project on the window's page. */
+let cwd = ''
+/**
+ * The `gui` value as this copy last read or wrote it. While `isGuiOn` the
+ * window's data file is rewritten at every change; while it is not, nothing
+ * is written at all. `sid` is the name the page and its data go by.
+ */
+let isGuiOn = false
+let sid = ''
+/** The folder the window's files go under, once asked for. */
+let home: string | undefined
+/** True where the options ask for the window as soon as two agents are at work. */
+let isAutoOpen = false
+/** True once this copy opened the window by itself: it does that once. */
+let hasAutoOpened = false
+/** True while a rewrite of the data file waits its turn: a burst of changes shares it. */
+let isWriteQueued = false
+/** Numbers the calls that carry no id of their own. */
+let serial = 0
 
 function debug($: EngineInterface, what: string, error: unknown): void {
   $.ui.log(`${NAME}: ${what}: ${String(error)}`, { to: 'debug' })
@@ -170,10 +225,10 @@ async function sync($: EngineInterface): Promise<AgentRow[]> {
   const [list, infos] = await Promise.all([read($, agents), $.agent.list()])
   const now = clock()
   const next = pruned(synced(list, infos, now))
-  const settled =
-    JSON.stringify(next) === JSON.stringify(list)
-      ? list
-      : await update($, agents, held => pruned(synced(held, infos, now)))
+  const isSame = JSON.stringify(next) === JSON.stringify(list)
+  const settled = isSame
+    ? list
+    : await update($, agents, held => pruned(synced(held, infos, now)))
 
   for (const row of settled) {
     heard.add(row.id)
@@ -182,6 +237,12 @@ async function sync($: EngineInterface): Promise<AgentRow[]> {
 
   post($, settled)
 
+  if (!isSame) {
+    // A row the cap let go takes its trail with it, in the queue's own order.
+    enqueue($, 'trail tidy', () => tidy($))
+    changed($, settled)
+  }
+
   return settled
 }
 
@@ -189,17 +250,28 @@ async function sync($: EngineInterface): Promise<AgentRow[]> {
 async function lower($: EngineInterface): Promise<void> {
   try {
     await $.ui.close({ id: PANE })
+    // The mod's own close does not come back through its `ui.close` hook, and
+    // the clock may go on for a window's beat: the pane is lowered only once.
+    isPaneUp = false
   } catch (error) {
     debug($, 'pane not closed', error)
   }
 }
 
 async function tick($: EngineInterface, beat: number): Promise<void> {
-  // Once nothing works the roster is left alone: the rows only fade.
+  // Once nothing works the roster is left alone: the rows only fade. A window
+  // that is fed still asks, so a teammate that idles is seen to leave.
   const list =
-    idleTicks === 0 && beat % SYNC_EVERY === 0
+    (idleTicks === 0 || isGuiOn) && beat % SYNC_EVERY === 0
       ? await sync($)
       : await read($, agents)
+  // While an agent lives the window's page gets a fresh beat, however little
+  // changes: a beat that stands still means the session is gone, not slow.
+  const isBeating = isGuiOn && list.some(isLive)
+
+  if (isBeating && beat % BEAT_TICKS === 0) {
+    refresh($)
+  }
 
   if (list.some(isBusy)) {
     idleTicks = 0
@@ -229,10 +301,13 @@ async function tick($: EngineInterface, beat: number): Promise<void> {
     return
   }
 
-  // Nothing works: stop asking until the next agent starts.
-  ticker?.cancel()
-  ticker = undefined
-  idleTicks = 0
+  // Nothing works: stop asking until the next agent starts. Only the beat of
+  // a fed window keeps the clock going, for as long as a teammate idles.
+  if (!isBeating) {
+    ticker?.cancel()
+    ticker = undefined
+    idleTicks = 0
+  }
 
   if (isPaneUp && !isPinned) {
     await lower($)
@@ -240,7 +315,8 @@ async function tick($: EngineInterface, beat: number): Promise<void> {
 }
 
 function watch($: EngineInterface): void {
-  // The clock only steps the pulse and re-reads the roster for the pane.
+  // The clock only steps the pulse, re-reads the roster for the pane and
+  // keeps the beat of a window's data.
   if (!hasScreen || ticker !== undefined) {
     return
   }
@@ -314,18 +390,29 @@ async function knows($: EngineInterface, id: string): Promise<boolean> {
   return true
 }
 
-/** Folds one event of a loop into its row, if the pane keeps one for it. */
+/**
+ * Folds one event of a loop into its row, if the pane keeps one for it, and
+ * into its trail where the event leaves a `trace` there.
+ */
 async function fold(
   $: EngineInterface,
   id: string,
   change: (list: readonly AgentRow[]) => AgentRow[],
+  trace?: (held: Trails) => Trails,
 ): Promise<void> {
   if (!(await knows($, id))) {
     return
   }
 
-  post($, await update($, agents, change))
+  if (trace !== undefined) {
+    await update($, trails, trace)
+  }
+
+  const rows = await update($, agents, change)
+
+  post($, rows)
   watch($)
+  changed($, rows)
 }
 
 /** Takes in an agent whose spawn just settled. */
@@ -344,6 +431,8 @@ async function admit(
   // The pane first: the status line is posted only where no pane will show.
   await show($)
   post($, rows)
+  await tidy($)
+  changed($, rows)
 }
 
 async function view($: EngineInterface, row: AgentRow): Promise<void> {
@@ -354,12 +443,313 @@ async function view($: EngineInterface, row: AgentRow): Promise<void> {
   }
 }
 
-export const register: Register = on => {
+/** The call's own id, which its end is matched by; one with none is numbered from its start. */
+function keyOf(input: Readonly<Record<string, unknown>>, startedAt: number): string {
+  const id = input.tool_use_id
+
+  if (typeof id === 'string' && id !== '') {
+    return id
+  }
+
+  serial += 1
+
+  return `${startedAt}-${serial}`
+}
+
+/**
+ * Lets go of the trails of agents the rows no longer hold; writes only a
+ * change. Run as a job of the queue, where rows and trails are added in
+ * turn: a trail just begun is never taken for a dropped agent's.
+ */
+async function tidy($: EngineInterface): Promise<void> {
+  const [rows, held] = await Promise.all([read($, agents), read($, trails)])
+  const ids = rows.map(row => row.id)
+
+  if (kept(held, ids) !== held) {
+    await update($, trails, now => kept(now, ids))
+  }
+}
+
+// --- The window: a page in a browser, fed by a data file --------------------
+//
+// The page is a local file and cannot talk to the mod. The mod lays it in
+// `<home>/.claude/agent-watch` under a name of the session's own, writes the
+// rows and their trails beside it, and the page reads that file again and
+// again. Local only, and it only watches.
+
+/** The folder the window's files go under: the profile on Windows, HOME elsewhere. */
+async function homeOf($: EngineInterface): Promise<string | undefined> {
+  home ??=
+    (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')) || undefined
+
+  return home
+}
+
+/** Writes the data file the page reads again: the rows and their trails as they stand. */
+async function writeData($: EngineInterface): Promise<void> {
+  const under = await homeOf($)
+
+  if (under === undefined || sid === '') {
+    throw new Error('the window has no folder or no name to write under')
+  }
+
+  const [rows, held] = await Promise.all([read($, agents), read($, trails)])
+  const data = payload({ id: sid, cwd }, rows, held, clock())
+
+  await $.fs.write(filed(under, `${sid}.js`), dataFile(data))
+}
+
+/**
+ * Asks for the data file to be rewritten, in its turn of the queue: a burst
+ * of changes shares one write, and no two writes overlap. With the window
+ * off it does nothing.
+ */
+function refresh($: EngineInterface): void {
+  if (!isGuiOn || isWriteQueued) {
+    return
+  }
+
+  isWriteQueued = true
+  enqueue($, 'window data', () => {
+    // Cleared before the rows are read: a change from here on asks again.
+    isWriteQueued = false
+
+    return writeData($)
+  })
+}
+
+/**
+ * Copies one of the page's files out of the mod's own folder; `stamp`, the
+ * session's name, is written into the page's source on the way. Says what
+ * failed, or nothing.
+ */
+async function copy(
+  $: EngineInterface,
+  name: string,
+  to: string,
+  stamp?: string,
+): Promise<string | undefined> {
+  let text: string
+
+  try {
+    text = await $.fs.read(`${$.plugin.root}/gui/${name}`)
+  } catch (error) {
+    debug($, `gui/${name} not read`, error)
+
+    return `the mod's gui/${name} could not be read`
+  }
+
+  try {
+    // Split and joined, never `replace` with a string: a page may hold `$&`.
+    await $.fs.write(
+      to,
+      stamp === undefined ? text : text.split(SID_TOKEN).join(stamp),
+    )
+  } catch (error) {
+    debug($, `${to} not written`, error)
+
+    return `${to} could not be written`
+  }
+
+  return undefined
+}
+
+/** How a launch went: a browser took the page, none was asked for, or why none did. */
+type Launch = { isLaunched: boolean; problem?: string }
+
+/**
+ * Opens the page in a window of its own: Edge's app mode on Windows, the
+ * desktop's own opener elsewhere, as far as that goes. A session with no
+ * screen and `AGENT_WATCH_BROWSER=none` open nothing.
+ */
+async function launch($: EngineInterface, url: string): Promise<Launch> {
+  if (!hasScreen || (await $.env.get('AGENT_WATCH_BROWSER')) === 'none') {
+    return { isLaunched: false }
+  }
+
+  const isWindows = (await $.env.get('OS')) === 'Windows_NT'
+  const openers: readonly (readonly string[])[] = isWindows
+    ? [['cmd', '/c', 'start', '', 'msedge', `--app=${url}`, `--window-size=${WINDOW_SIZE}`]]
+    : [
+        ['xdg-open', url],
+        ['open', url],
+      ]
+
+  for (const argv of openers) {
+    const [opener = 'opener'] = argv
+
+    try {
+      const ran = await $.process.run(argv)
+
+      if (ran.exitCode === 0) {
+        return { isLaunched: true }
+      }
+
+      debug(
+        $,
+        `${opener} opened no window`,
+        `exit code ${ran.exitCode}: ${brief(ran.stderr, 160)}`,
+      )
+    } catch (error) {
+      debug($, `${opener} not started`, error)
+    }
+  }
+
+  return {
+    isLaunched: false,
+    problem: 'no browser could be started, so open the page by hand',
+  }
+}
+
+/** What opening the window came to. */
+type Opened = {
+  /** The command's answer: how it went, where the page is, what failed. */
+  text: string
+  /** What failed, each in a few words; empty when all went well. */
+  problems: string[]
+}
+
+const unopened = (why: string): Opened => ({
+  text: `Agents window not opened: ${why}.`,
+  problems: [why],
+})
+
+/** A problem as a line of the answer: `its data…` reads `Its data….` */
+const sentence = (words: string): string =>
+  `${words.charAt(0).toUpperCase()}${words.slice(1)}.`
+
+/** Lays the page's other files beside it; says which could not be laid. */
+async function layAssets($: EngineInterface, under: string): Promise<string[]> {
+  const problems: string[] = []
+
+  for (const asset of ASSETS) {
+    const problem = await copy($, asset, filed(under, asset))
+
+    if (problem !== undefined) {
+      problems.push(problem)
+    }
+  }
+
+  return problems
+}
+
+/**
+ * The page's first data, written in its turn of the queue like every write
+ * after it. False when it could not be written; the debug log says why.
+ */
+async function writeFirst($: EngineInterface): Promise<boolean> {
+  let isWritten = false as boolean
+
+  await enqueue($, 'window data', async () => {
+    await writeData($)
+    isWritten = true
+  })
+
+  return isWritten
+}
+
+/**
+ * Lays the page and its data in `<home>/.claude/agent-watch` and opens the
+ * page in a window; from then on every change is written for it. Nothing
+ * here throws: what failed is logged, and said in the answer.
+ *
+ * Never awaited from a job of the queue: its first write waits its turn there.
+ */
+async function openWindow($: EngineInterface): Promise<Opened> {
+  const under = await homeOf($)
+
+  if (under === undefined) {
+    debug($, 'window not opened', 'neither USERPROFILE nor HOME is set')
+
+    return unopened('no home folder is set (USERPROFILE or HOME)')
+  }
+
+  // Made once, and before the first wait: a window asked for again, or twice
+  // at the same moment, reads the same files.
+  if (sid === '') {
+    sid = minted(clock(), Math.random)
+  }
+
+  const name = sid
+  const page = filed(under, `${name}.html`)
+  const unlaid = await copy($, 'index.html', page, name)
+
+  // With no page there is nothing to feed: the window stays off.
+  if (unlaid !== undefined) {
+    return unopened(unlaid)
+  }
+
+  const problems = await layAssets($, under)
+
+  isGuiOn = true
+  // Kept, so a reload feeds the same page; a store that fails costs only that.
+  await update($, gui, () => ({ sid: name, isOn: true })).catch((error: unknown) =>
+    debug($, 'window not kept', error),
+  )
+
+  if (!(await writeFirst($))) {
+    problems.push('its data file could not be written')
+  }
+
+  const { isLaunched, problem } = await launch($, pageUrl(page))
+
+  if (problem !== undefined) {
+    problems.push(problem)
+  }
+
+  const lines = [
+    isLaunched ? 'Agents window opened.' : 'Agents window ready.',
+    // Said with forward slashes: the answer is drawn as markdown, where a
+    // backslash before `.claude` is an escape and would vanish from the path.
+    page.split('\\').join('/'),
+    ...problems.map(sentence),
+  ]
+
+  return { text: lines.join('\n'), problems }
+}
+
+/**
+ * Opens the window by itself the first time two agents are at work, where
+ * the options ask for it. Not waited on: this is called from the queue.
+ */
+function autoOpen($: EngineInterface, rows: readonly AgentRow[]): void {
+  if (
+    !isAutoOpen ||
+    hasAutoOpened ||
+    isGuiOn ||
+    rows.filter(isLive).length < 2
+  ) {
+    return
+  }
+
+  hasAutoOpened = true
+  openWindow($)
+    .then(opened => {
+      // Nobody asked, so nobody reads an answer: what failed is said in a toast.
+      const [problem] = opened.problems
+
+      if (problem !== undefined) {
+        $.ui.toast(`Agents window: ${problem}`)
+      }
+    })
+    .catch((error: unknown) => debug($, 'window not opened', error))
+}
+
+/** After the rows or the trails changed: the window opens if it is time, and its data is rewritten. */
+function changed($: EngineInterface, rows: readonly AgentRow[]): void {
+  autoOpen($, rows)
+  refresh($)
+}
+
+export const register: Register = (on, options) => {
+  isAutoOpen = options.autoOpenWindow === true
+
   on('session.start', async ($, e, next) => {
     isOff =
       (await $.env.get('DELTAO_NESTED_CLI')) === '1' &&
       (await $.env.get('AGENT_WATCH')) !== 'on'
     hasScreen = e.isInteractive
+    cwd = e.cwd
 
     if (isOff) {
       return next(e)
@@ -383,11 +773,19 @@ export const register: Register = on => {
 
     // A reload, or a session already under way: pick the watch back up.
     enqueue($, 'start', async () => {
+      // A window opened before the reload is still fed, under the same name.
+      const stored = await read($, gui)
+
+      sid = isSid(stored.sid) ? stored.sid : ''
+      isGuiOn = stored.isOn === true && sid !== ''
+
       const list = await sync($)
 
       if (list.some(isLive)) {
         await show($)
       }
+
+      changed($, list)
     })
 
     return next(e)
@@ -396,6 +794,15 @@ export const register: Register = on => {
   on('command.run', { command: 'agent-watch' }, async ($, e, next) => {
     if (isOff) {
       return next(e)
+    }
+
+    // `/agent-watch gui` opens the window in a browser; the pane is left alone.
+    if (e.args.trim().startsWith('gui')) {
+      // What was heard so far is folded before the page's first data is written.
+      await queue
+      await sync($)
+
+      return { text: (await openWindow($)).text }
     }
 
     await update($, isDismissed, () => false)
@@ -519,20 +926,37 @@ export const register: Register = on => {
     const activity = describeCall(e.tool, input)
     const isCounted = !isBookkeeping(e.tool)
     const startedAt = clock()
+    const call = called(keyOf(input, startedAt), activity, startedAt)
+    // Failed, until the call comes back with an answer that is no error and no refusal.
+    let isFailed = true
 
     grace = GRACE
     enqueue($, 'tool call', () =>
-      fold($, id, held => acted(held, id, activity, startedAt, isCounted)),
+      fold(
+        $,
+        id,
+        held => acted(held, id, activity, startedAt, isCounted),
+        held => began(held, id, call),
+      ),
     )
 
     try {
-      return await next(e)
+      const ran = await next(e)
+
+      isFailed = ran.deny !== undefined || ran.isError === true
+
+      return ran
     } finally {
       // However the call ended, it is no longer in flight.
       const endedAt = clock()
 
       enqueue($, 'tool return', () =>
-        fold($, id, held => rested(held, id, endedAt)),
+        fold(
+          $,
+          id,
+          held => rested(held, id, endedAt),
+          held => finished(held, id, call.key, endedAt, isFailed),
+        ),
       )
     }
   })
@@ -552,9 +976,17 @@ export const register: Register = on => {
       const now = clock()
 
       grace = GRACE
-      enqueue($, 'turn end', () =>
-        fold($, id, held => ended(held, id, ending, now)),
-      )
+      enqueue($, 'turn end', () => {
+        // The window has room for more of the answer than a row does.
+        const result = summarized(ending.answer, RESULT_MAX)
+
+        return fold(
+          $,
+          id,
+          held => ended(held, id, ending, now),
+          held => resulted(held, id, result),
+        )
+      })
     }
 
     return next(e)

@@ -29,6 +29,21 @@ The pane opens by itself when the first agent starts, and closes by itself about
 - While no pane is drawn (you closed it, or the terminal is too narrow) the status line under the prompt says how many agents are working.
 - The model can read the same roster through the tool `mcp__agent-watch__snapshot`.
 
+## The window
+
+`/agent-watch gui` opens the same agents in a window of their own: a timeline with a lane per agent and a bar for every tool call, so you can see where the time went.
+
+- Each lane's faint band is how long the agent has been alive; the bars on it are its tool calls. A call in flight is outlined in emerald and grows with the clock, then settles on its true length when it ends. Calls that ran side by side are stacked.
+- Click a lane for its calls, newest first, with how long each took, its tool and token counts, and its answer once it finishes.
+- `Float on top` hands over to a small window that stays above everything, the fullscreen terminal included. Click it to list every agent; it says so for a moment when one finishes. Closing it brings the full window back.
+- Turn on `Open the agents window by itself` in the plugin's options to have it open the first time two agents are working. It is off by default, since a window that opens while you type takes the keyboard.
+
+How it works, and what it cannot do: the mod writes one small data file in `~/.claude/agent-watch` whenever something changes, and the page re-reads it four times a second. Nothing listens on a port and the page fetches nothing from the network, so it is local by construction, and it has no way to send anything back to Claude, so it can only watch. A session whose data stops arriving reads `not responding` instead of pretending to still run.
+
+It opens as a Microsoft Edge app window on Windows and in the default browser elsewhere (untested there). Set `AGENT_WATCH_BROWSER=none` to have the command lay the page down and print its path without opening anything. The floating window uses the browser's Document Picture-in-Picture, which only opens on a click and only resizes on a click; a browser without it gets an ordinary small window instead. With `prefers-reduced-motion` set, nothing animates and every change lands at once. Each session that opens the window leaves two small files in that folder; nothing clears them yet.
+
+What ships in `gui/` and under which license (the Motion animation library and two embedded fonts) is in `gui/NOTICE.md`.
+
 ## What it touches
 
 It only watches. It never blocks, changes or delays a tool call: the bookkeeping runs after the event has gone on its way, at a measured cost of about 2 ms per subagent tool call.
