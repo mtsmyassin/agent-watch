@@ -11,6 +11,7 @@ import {
   drawn,
   GONE_MS,
   heading,
+  isBookkeeping,
   plain,
   redact,
   settled,
@@ -19,6 +20,7 @@ import {
   summarized,
   SUMMARY_MS,
   synced,
+  typeName,
   unpathed,
 } from '../hooks/roster'
 import type { Sight } from '../hooks/roster'
@@ -930,6 +932,25 @@ test('a connected tool is said in plain words, never by its raw name', () => {
   expect(settled('Reading page')).toBe('Read page')
   expect(settled('Listing events')).toBe('Listed events')
   expect(settled('Using the browser')).toBe('Used the browser')
+})
+
+test('an oddly named tool, server or type still reads as words', () => {
+  // A name every object carries (`constructor`) is a word like any other.
+  expect(describeCall('constructor', {})).toBe('Using constructor')
+  expect(describeCall('mcp__x__constructor', {})).toBe('Using X')
+  expect(describeCall('mcp__constructor__list_events', {})).toBe('Listing events')
+  expect(isBookkeeping('constructor')).toBe(false)
+  expect(typeName(agent('t1', { type: 'constructor' }))).toBe('constructor')
+  // A link with no host, or a call with nothing to name, leaves no colon hanging.
+  expect(describeCall('mcp__x__read_page', { url: '/foo' })).toBe('Reading page')
+  expect(describeCall('Agent', {})).toBe('Starting an agent')
+  // However a server's id is spelled, it is said as a person names it.
+  expect(describeCall('mcp__Claude_in_Chrome__computer', {})).toBe('Using the browser')
+  expect(describeCall('mcp__plugin:bio:consensus__search', {})).toBe(
+    'Searching with Consensus',
+  )
+  expect(describeCall('mcp__x__GetHTMLPage', {})).toBe('Getting html page')
+  expect(describeCall('mcp__x__list_of_events', {})).toBe('Listing events')
 })
 
 test('the type is said short, so the task keeps the room', () => {

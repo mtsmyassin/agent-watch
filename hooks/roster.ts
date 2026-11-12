@@ -250,13 +250,28 @@ const fileName = (path: string): string => lastFolder(path.trim())
 const host = (url: string): string =>
   url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[/?#]/)[0] ?? url
 
-/** `NotebookRead` and `firecrawl_search` as words: `notebook read`, `firecrawl search`. */
+/**
+ * `NotebookRead`, `GetHTMLPage` and `firecrawl_search` as words: `notebook
+ * read`, `get html page`, `firecrawl search`.
+ */
 const worded = (name: string): string =>
   name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/[_:.\s-]+/g, ' ')
     .trim()
     .toLowerCase()
+
+/**
+ * A table's own entry. A plain lookup also answers for the names every object
+ * carries (`constructor`), and a tool or a type may be called just that.
+ */
+function entry<T>(
+  table: Readonly<Record<string, T>>,
+  key: string,
+): T | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined
+}
 
 /** What a tool call is about, for a tool this file has no sentence for. */
 const SUBJECT = [
@@ -281,7 +296,8 @@ const BOOKKEEPING: Readonly<Record<string, string>> = {
   StructuredOutput: 'Writing the result',
 }
 
-export const isBookkeeping = (tool: string): boolean => tool in BOOKKEEPING
+export const isBookkeeping = (tool: string): boolean =>
+  entry(BOOKKEEPING, tool) !== undefined
 
 /**
  * The verb in a tool's name as the start of a sentence, now and once the call
@@ -339,7 +355,7 @@ const VERBS: Readonly<Record<string, readonly [string, string]>> = {
 }
 
 /** Words in a tool's name that say nothing about what it does. */
-const FILLER = new Set(['tool', 'tools', 'mcp', 'api', 'take', 'do', 'the', 'a'])
+const FILLER = new Set(['tool', 'tools', 'mcp', 'api', 'take', 'do', 'the', 'a', 'of'])
 
 /** Servers a person knows by what they are, not by their id. */
 const SERVICES: Readonly<Record<string, string>> = {
@@ -353,15 +369,16 @@ const SERVICES: Readonly<Record<string, string>> = {
  * `Google Calendar`, `claude-in-chrome` is `the browser`.
  */
 function service(server: string): string {
-  const bare = server.replace(/^(?:claude_ai_|plugin_[a-z0-9-]+_)/i, '')
+  // However the id is spelled (`claude-in-chrome`, `Claude_in_Chrome`,
+  // `plugin:design:figma`), it is read as its words.
+  const words = server
+    .replace(/^(?:claude[_:.]ai[_:.]|plugin[_:][a-z0-9-]+[_:])/i, '')
+    .split(/[_:.\s-]+/)
+    .filter(word => word !== '')
 
   return (
-    SERVICES[bare.toLowerCase()] ??
-    bare
-      .split(/[_\s-]+/)
-      .filter(word => word !== '')
-      .map(word => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
-      .join(' ')
+    entry(SERVICES, words.join('-').toLowerCase()) ??
+    words.map(word => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(' ')
   )
 }
 
@@ -371,8 +388,8 @@ function service(server: string): string {
  * belongs to, when it is a connected one.
  */
 function phrased(words: readonly string[], where: string): string {
-  const at = words.findIndex(word => word in VERBS)
-  const verb = at === -1 ? undefined : VERBS[words[at] ?? '']
+  const at = words.findIndex(word => entry(VERBS, word) !== undefined)
+  const verb = at === -1 ? undefined : entry(VERBS, words[at] ?? '')
   const what = words.filter((_, index) => index !== at).join(' ')
 
   if (verb === undefined) {
@@ -425,7 +442,7 @@ export function describeCall(
   const file = fileName(
     text('file_path') || text('notebook_path') || text('path'),
   )
-  const plain = PLAIN[tool]
+  const plain = entry(PLAIN, tool)
 
   if (plain !== undefined) {
     return plain
@@ -453,7 +470,9 @@ export function describeCall(
       return say('Searching the web for', text('query'))
     case 'Agent':
     case 'Task':
-      return say('Starting an agent:', text('description'))
+      return text('description') === ''
+        ? 'Starting an agent'
+        : say('Starting an agent:', text('description'))
     case 'Skill':
       return say('Using the skill', text('skill'))
   }
@@ -475,18 +494,23 @@ export function describeCall(
   const lead = phrased(words, where)
   // Where the call names its subject, that says more than the service does:
   // `Searching: claude hooks`. A name with no verb keeps the service.
-  const opening = words.some(word => word in VERBS) ? phrased(words, '') : lead
+  const opening = words.some(word => entry(VERBS, word) !== undefined)
+    ? phrased(words, '')
+    : lead
 
   for (const field of SUBJECT) {
     const value = text(field)
+    const subject =
+      value === ''
+        ? ''
+        : field.endsWith('path')
+          ? fileName(value)
+          : field === 'url'
+            ? host(value)
+            : unpathed(value)
 
-    if (value !== '') {
-      const subject = field.endsWith('path')
-        ? fileName(value)
-        : field === 'url'
-          ? host(value)
-          : unpathed(value)
-
+    // A link with no host names nothing: no colon is left hanging for it.
+    if (subject.trim() !== '') {
       return say(`${opening}:`, subject)
     }
   }
@@ -1128,7 +1152,7 @@ const TYPE_NAMES: Readonly<Record<string, string>> = {
 export function typeName(row: AgentRow): string {
   const bare = row.type.slice(row.type.lastIndexOf(':') + 1) || row.type
 
-  return TYPE_NAMES[bare] ?? bare
+  return entry(TYPE_NAMES, bare) ?? bare
 }
 
 /** `7 tools`; nothing at all before the first call, where a zero says nothing. */
