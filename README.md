@@ -2,7 +2,9 @@
 
 A live pane for Claude Code that shows what every subagent in the session is doing right now.
 
-Each agent gets a row: its state, its type, the task it was given and how long it has run. Under that sits the tool call it is on (or `thinking`, or `quiet for 2m 10s`), how many tools it has used and how many tokens. Agents that finished move to a short list with the opening of their answer.
+Each agent gets one aligned row: a mark, its type, the task it was given, what it is doing and how long it has run. What it is doing is said the way a person would say it: `Reading notes.txt`, `Searching *.txt`, `Running pytest -x`, then `Read notes.txt` once the call is over, with the number of tools used so far. An agent that finishes fades to a dim row with a check mark and a one-line summary of its answer.
+
+The look is deliberately quiet: no boxes and no bars, order shown by weight and brightness, and one accent color that marks an agent at work. Every working agent's mark breathes in the same slow pulse.
 
 ## Install
 
@@ -18,11 +20,12 @@ This repository is private. Your GitHub account has to be invited to it, and Git
 
 ## Using it
 
-The pane opens by itself when the first agent starts. In the fullscreen layout it docks beside the transcript and draws a card per working agent with an activity strip; in the normal layout it sits above the prompt with one bare row per agent.
+The pane opens by itself when the first agent starts, and closes by itself about 15 seconds after the last one finishes. In the fullscreen layout it docks beside the transcript; in the normal layout it sits above the prompt and is only as tall as its rows. Where the pane is too narrow for every column, each row folds: who and how long on one line, what it is doing on the line beneath.
 
 - `ctrl+x tab` moves focus to the pane, and `ctrl+x x` closes it. A pane you closed stays closed until you ask for it.
-- `/agent-watch` reopens the pane and prints the whole roster as text.
-- Press an agent's row to jump to its transcript. `clear finished` drops the agents that are done.
+- `/agent-watch` reopens the pane and prints the whole roster as text. A pane you asked for stays open until you close it, with the agents that finished still listed.
+- Press an agent's row to jump to its transcript.
+- A finished agent's summary closes to its row after 30 seconds, and the row leaves a pane you did not ask for after two minutes. Nothing needs clearing by hand.
 - While no pane is drawn (you closed it, or the terminal is too narrow) the status line under the prompt says how many agents are working.
 - The model can read the same roster through the tool `mcp__agent-watch__snapshot`.
 

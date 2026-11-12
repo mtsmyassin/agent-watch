@@ -26,16 +26,15 @@ export type AgentRow = {
   /** When the mod last heard anything from it. */
   seenAt: number
   endedAt?: number
-  /** The tool call it is on, or was last on, already redacted. */
+  /** The tool call it is on, or was last on, as a person says it; already redacted. */
   activity?: string
   /** How many of its tool calls are in flight; an agent may run several at once. */
   inFlight: number
+  /** Its tool calls so far, the engine's own bookkeeping calls left out. */
   tools: number
-  /** When its latest tool calls began, oldest first: the activity strip's data. */
-  calls?: number[]
   /** Fresh tokens its finished turns read and wrote, cache re-reads left out. */
   tokens: number
-  /** The opening of its final answer, already redacted. */
+  /** Its final answer as one line of about 80 letters: folder paths cut, already redacted. */
   answer?: string
 }
 

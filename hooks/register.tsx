@@ -1,93 +1,84 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { AgentRow, AgentState } from '../types'
+import type { AgentRow } from '../types'
 import {
   acted,
-  arranged,
   born,
   brief,
   describeCall,
-  doing,
-  elapsed,
+  drawn,
   ended,
-  facts,
+  isBookkeeping,
   isBusy,
   isLive,
-  isQuiet,
   pruned,
   report,
   rested,
-  spark,
   spawned,
   statusText,
   synced,
-  tally,
   woke,
 } from './roster'
-import type { Seated } from './roster'
+import type { Span, Tone } from './roster'
 
 const NAME = 'agent-watch'
 const PANE = 'agent-watch'
 const TITLE = 'Agents'
 const SNAPSHOT = 'mcp__agent-watch__snapshot'
-/** One spinner frame: the pane redraws at this pace while an agent works. */
-const FRAME_MS = 250
-/** Every fourth frame is a tick: the rows are read, and the clocks may stop. */
-const FRAMES_PER_TICK = 4
+/** One step of the pulse: the pane redraws at this pace while an agent works. */
+const FRAME_MS = 500
+/** Every second frame is a tick: the rows are read, and the clocks may stop. */
+const FRAMES_PER_TICK = 2
 /** Every third tick also asks the engine's roster where each agent stands. */
 const SYNC_EVERY = 3
-const FINISHED_SHOWN = 6
+/**
+ * Ticks (seconds) a pane nobody asked for stays once nothing works, so the
+ * results can be read; then it closes by itself.
+ */
+const LINGER_TICKS = 15
+/** Ticks a pane the person asked for keeps redrawing, until each result line has closed. */
+const SETTLE_TICKS = 34
 
-// The DeltaO.ai palette (DESIGN.md): a near-void canvas, warm off-white text
-// in three strengths, and three accents that each mean one thing. Emerald is
-// work under way, amber asks for a look, crimson is the brand and a failure.
+// The DeltaO.ai palette (DESIGN.md): a near-void canvas and warm off-white
+// text in three strengths. Order is weight and brightness; the one accent,
+// emerald, marks an agent at work and nothing else.
 const INK = {
   canvas: '#08090a',
   text: '#EDEDEC',
   soft: '#A1A1A6',
   faint: '#6B6B73',
-  line: '#48484A',
-  crimson: '#E5383B',
-  amber: '#D4943A',
   emerald: '#0D9668',
 } as const
-/** Each accent at 15% over the canvas: a badge's ground, as DESIGN.md mixes it. */
-const TINT = {
-  emerald: '#091E18',
-  amber: '#271E11',
-  crimson: '#291011',
-  neutral: '#171819',
-} as const
-const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
-/** The pane is its own dark panel, so its colors hold on any terminal theme. */
-const PANE_LOOK = { rows: 12, columns: 48, backgroundColor: INK.canvas } as const
+/**
+ * One calm breath, shared by every working agent's mark: emerald at full,
+ * 65% and 40% over the canvas and back, a step each frame.
+ */
+const PULSE = [INK.emerald, '#0B6547', '#0A4130', '#0B6547'] as const
+const TONES: Record<Exclude<Tone, 'pulse'>, { color: string; isBold: boolean }> = {
+  strong: { color: INK.text, isBold: true },
+  bright: { color: INK.text, isBold: false },
+  soft: { color: INK.soft, isBold: false },
+  faint: { color: INK.faint, isBold: false },
+}
+/**
+ * The pane is its own dark panel, so its colors hold on any terminal theme.
+ * Docked it asks for the width one aligned row needs; inline, for the rows of
+ * ten agents and a header, and the frame fits what is drawn.
+ */
+const PANE_LOOK = { rows: 12, columns: 76, backgroundColor: INK.canvas } as const
 
 // Change the tag when a row's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const agents = atom({ plugin: 'agent-watch', key: 'agents' } as const, [], {
-  shape: 'agents-1',
+  shape: 'agents-2',
 })
 const isDismissed = atom(
   { plugin: 'agent-watch', key: 'isDismissed' } as const,
   false,
 )
 
-/** A state's mark where no spinner turns: a finished row, a waiting one. */
-const MARKS: Record<AgentState, { glyph: string; color: string }> = {
-  pending: { glyph: '○', color: INK.faint },
-  running: { glyph: '●', color: INK.emerald },
-  waiting: { glyph: '▲', color: INK.amber },
-  idle: { glyph: '○', color: INK.amber },
-  completed: { glyph: '✓', color: INK.emerald },
-  failed: { glyph: '✗', color: INK.crimson },
-  killed: { glyph: '■', color: INK.crimson },
-}
-
 const clock = (): number => Date.now()
-
-const fit = (text: string, room: number): string =>
-  text.length > room ? `${text.slice(0, Math.max(1, room - 1))}…` : text
 
 /** A loop found in no roster is looked up again after this long. */
 const STRANGER_MS = 5000
@@ -106,9 +97,17 @@ let hasScreen = true
 /** True while a surface draws the pane; the status line speaks only when none does. */
 let isPaneUp = false
 let isOpening = false
+/**
+ * True once the person asked for the pane (`/agent-watch`): it then stays
+ * until they close it. One the mod opened on its own closes itself when the
+ * work is done.
+ */
+let isPinned = false
 let ticker: Timer | undefined
 let isTicking = false
 let grace = 0
+/** Ticks in a row with nothing at work; the pane steps aside at LINGER_TICKS. */
+let idleTicks = 0
 /** `null` until this copy has posted, so a line an earlier copy left is replaced. */
 let shownStatus: string | undefined | null = null
 /** The folds, one at a time, in the order their events came. */
@@ -186,11 +185,24 @@ async function sync($: EngineInterface): Promise<AgentRow[]> {
   return settled
 }
 
+/** Closes a pane the mod opened itself; the next agent opens it again. */
+async function lower($: EngineInterface): Promise<void> {
+  try {
+    await $.ui.close({ id: PANE })
+  } catch (error) {
+    debug($, 'pane not closed', error)
+  }
+}
+
 async function tick($: EngineInterface, beat: number): Promise<void> {
+  // Once nothing works the roster is left alone: the rows only fade.
   const list =
-    beat % SYNC_EVERY === 0 ? await sync($) : await read($, agents)
+    idleTicks === 0 && beat % SYNC_EVERY === 0
+      ? await sync($)
+      : await read($, agents)
 
   if (list.some(isBusy)) {
+    idleTicks = 0
     $.ui.invalidate('ui.render')
 
     return
@@ -203,14 +215,32 @@ async function tick($: EngineInterface, beat: number): Promise<void> {
     return
   }
 
+  idleTicks += 1
+
+  if (idleTicks === 1) {
+    post($, list)
+  }
+
+  // The results stay a moment to be read, each closing to one line; a pane
+  // the person asked for stays after that, one the mod opened steps aside.
+  if (isPaneUp && idleTicks < (isPinned ? SETTLE_TICKS : LINGER_TICKS)) {
+    $.ui.invalidate('ui.render')
+
+    return
+  }
+
   // Nothing works: stop asking until the next agent starts.
   ticker?.cancel()
   ticker = undefined
-  post($, list)
+  idleTicks = 0
+
+  if (isPaneUp && !isPinned) {
+    await lower($)
+  }
 }
 
 function watch($: EngineInterface): void {
-  // The clock only turns the spinner and re-reads the roster for the pane.
+  // The clock only steps the pulse and re-reads the roster for the pane.
   if (!hasScreen || ticker !== undefined) {
     return
   }
@@ -220,7 +250,7 @@ function watch($: EngineInterface): void {
   ticker = $.clock.every(FRAME_MS, () => {
     frame += 1
 
-    // Between ticks only the spinner turns: a redraw, with nothing read.
+    // Between ticks only the pulse steps: a redraw, with nothing read.
     if (frame % FRAMES_PER_TICK !== 0) {
       $.ui.invalidate('ui.render')
 
@@ -373,12 +403,14 @@ export const register: Register = on => {
     await queue
     const list = await sync($)
 
-    if (list.some(isBusy)) {
-      watch($)
-    }
-
     if (hasScreen) {
+      // Asked for, the pane stays until the person closes it.
+      isPinned = true
+      idleTicks = 0
       await raise($)
+      // The clock runs on a little even with nothing at work, so a result
+      // line that has been read closes on time.
+      watch($)
     }
 
     return { text: report(list, clock()) }
@@ -401,6 +433,8 @@ export const register: Register = on => {
 
     // Closed by hand: stay closed until they ask for the pane again.
     if (e.origin.kind === 'person') {
+      isPinned = false
+
       // A store that fails must not keep the pane from closing.
       await update($, isDismissed, () => true).catch((error: unknown) =>
         debug($, 'dismissal not kept', error),
@@ -483,11 +517,12 @@ export const register: Register = on => {
 
     const input = e as unknown as Readonly<Record<string, unknown>>
     const activity = describeCall(e.tool, input)
+    const isCounted = !isBookkeeping(e.tool)
     const startedAt = clock()
 
     grace = GRACE
     enqueue($, 'tool call', () =>
-      fold($, id, held => acted(held, id, activity, startedAt)),
+      fold($, id, held => acted(held, id, activity, startedAt, isCounted)),
     )
 
     try {
@@ -533,216 +568,51 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const list = await read($, agents)
     const now = clock()
-    // Docked beside the transcript there is room for a card per working
-    // agent; inline above the prompt every row counts, so rows stay bare.
     const isDocked = e.props.placement === 'dock'
     // Docked, the body runs edge to edge: a column is kept clear each side.
     const gutter = isDocked ? 1 : 0
-    const columns = Math.max(24, e.props.bodyColumns - gutter * 2)
-    const seated = arranged(list)
-    const live = seated.filter(({ row }) => isLive(row))
-    const done = seated.filter(({ row }) => !isLive(row))
-    const shownDone = done.slice(0, FINISHED_SHOWN)
-    const hidden = done.length - shownDone.length
-    const counts = tally(list)
-    const frame = SPINNER[Math.floor(now / FRAME_MS) % SPINNER.length] ?? '●'
+    const drawing = drawn(list, now, {
+      columns: e.props.bodyColumns - gutter * 2,
+      rows: e.props.scroll.bodyRows,
+      isDocked,
+      isPinned,
+    })
+    // Every working agent's mark takes the same step of the same breath.
+    const breath = PULSE[Math.floor(now / FRAME_MS) % PULSE.length] ?? INK.emerald
 
-    const open = (row: AgentRow) => (): void => {
-      view($, row).catch((error: unknown) => debug($, 'view not moved', error))
-    }
-
-    const badge = (count: number, word: string, color: string, ground: string) =>
-      count > 0 && (
-        <Text color={color} backgroundColor={ground}>
-          {` ${count} ${word} `}
+    const paint = (span: Span) =>
+      span.tone === 'pulse' ? (
+        <Text color={breath}>{span.text}</Text>
+      ) : TONES[span.tone].isBold ? (
+        <Text color={TONES[span.tone].color} weight="bold">
+          {span.text}
         </Text>
+      ) : (
+        <Text color={TONES[span.tone].color}>{span.text}</Text>
       )
 
-    /** How far a row sits in: under its parent, when the parent is in sight. */
-    const indentOf = (section: readonly Seated[], seat: Seated): number => {
-      const parentId = seat.row.parentId
-      const isUnderParent =
-        parentId !== undefined && section.some(one => one.row.id === parentId)
+    const open = (id: string) => (): void => {
+      const row = list.find(one => one.id === id)
 
-      return isUnderParent ? Math.min(seat.depth, 3) * 2 : 0
-    }
-
-    /**
-     * What the agent is on, the tool's name standing out from its detail.
-     * The text is cut to leave `tail` (the counts) whole at the row's end.
-     */
-    const activity = (row: AgentRow, tail: string, room: number) => {
-      const text = fit(doing(row, now), Math.max(8, room - 2 - tail.length))
-
-      if (isQuiet(row, now) || row.state === 'waiting') {
-        return (
-          <Text color={INK.amber} wrap="truncate-end">
-            {'  '}
-            {text}
-            {tail}
-          </Text>
-        )
+      if (row !== undefined) {
+        view($, row).catch((error: unknown) => debug($, 'view not moved', error))
       }
-
-      if (row.state !== 'running' || row.inFlight === 0) {
-        return (
-          <Text color={INK.faint} italic wrap="truncate-end">
-            {'  '}
-            {text}
-            {tail}
-          </Text>
-        )
-      }
-
-      const cut = text.indexOf(': ')
-
-      return (
-        <Text wrap="truncate-end">
-          {'  '}
-          <Text color={INK.text}>{cut === -1 ? text : text.slice(0, cut)}</Text>
-          <Text color={INK.soft}>{cut === -1 ? '' : text.slice(cut)}</Text>
-          <Text color={INK.faint}>{tail}</Text>
-        </Text>
-      )
-    }
-
-    /** An agent still at work: a card when docked, two bare rows inline. */
-    const card = (seat: Seated) => {
-      const { row } = seat
-      const indent = indentOf(live, seat)
-      const wantsLook = isQuiet(row, now) || row.state === 'waiting'
-      const accent = wantsLook
-        ? INK.amber
-        : row.state === 'running'
-          ? INK.emerald
-          : INK.line
-      const isTurning = row.state === 'running'
-      const mark = MARKS[row.state]
-      const time = elapsed(row, now)
-      const inner = columns - indent - (isDocked ? 4 : 0)
-      const room = inner - row.type.length - time.length - 5
-      const edge = isDocked
-        ? ({ borderStyle: 'round', borderColor: accent, paddingX: 1 } as const)
-        : {}
-
-      return (
-        <Box flexDirection="column" marginLeft={indent} {...edge}>
-          <Box justifyContent="space-between">
-            <Button key={`agent:${row.id}`} plain onPress={open(row)}>
-              <Text color={isTurning ? accent : mark.color}>
-                {isTurning ? frame : mark.glyph}
-              </Text>{' '}
-              <Text color={INK.text} weight="bold">
-                {row.type}
-              </Text>{' '}
-              <Text color={INK.soft}>
-                {fit(row.description, Math.max(8, room))}
-              </Text>
-            </Button>
-            <Text color={INK.faint}> {time}</Text>
-          </Box>
-          {activity(row, isDocked ? '' : ` · ${facts(row)}`, inner)}
-          {isDocked && (
-            <Text wrap="truncate-end">
-              {'  '}
-              <Text color={accent}>{spark(row, now)}</Text>
-              <Text color={INK.faint}>{`  ${facts(row)}`}</Text>
-            </Text>
-          )}
-        </Box>
-      )
-    }
-
-    /** An agent that ended: two quiet rows, its mark the only color. */
-    const past = (seat: Seated) => {
-      const { row } = seat
-      const indent = indentOf(shownDone, seat)
-      const mark = MARKS[row.state]
-      const time = elapsed(row, now)
-      const room = columns - indent - row.type.length - time.length - 5
-      const counts = facts(row)
-      // How it ended is cut short, so the counts after it are never lost.
-      const said = fit(
-        doing(row, now),
-        Math.max(8, columns - indent - counts.length - 5),
-      )
-
-      return (
-        <Box flexDirection="column" marginLeft={indent}>
-          <Box justifyContent="space-between">
-            <Button key={`agent:${row.id}`} plain onPress={open(row)}>
-              <Text color={mark.color}>{mark.glyph}</Text>{' '}
-              <Text color={INK.soft} weight="bold">
-                {row.type}
-              </Text>{' '}
-              <Text color={INK.faint}>
-                {fit(row.description, Math.max(8, room))}
-              </Text>
-            </Button>
-            <Text color={INK.faint}> {time}</Text>
-          </Box>
-          <Text color={INK.faint} wrap="truncate-end">
-            {'  '}
-            {said} · {counts}
-          </Text>
-        </Box>
-      )
     }
 
     return (
       <Box flexDirection="column" paddingX={gutter}>
-        <Box gap={1} flexWrap="wrap">
-          <Text>
-            <Text color={INK.crimson} weight="bold">
-              Δ
-            </Text>{' '}
-            <Text color={INK.text} weight="bold">
-              AGENTS
-            </Text>
-          </Text>
-          {badge(counts.working, 'working', INK.emerald, TINT.emerald)}
-          {badge(counts.idle, 'idle', INK.amber, TINT.amber)}
-          {badge(counts.done, 'done', INK.soft, TINT.neutral)}
-          {badge(counts.failed, 'failed', INK.crimson, TINT.crimson)}
+        <Text wrap="truncate-end">{drawing.head.map(paint)}</Text>
+        <Box flexDirection="column" marginTop={isDocked ? 1 : 0}>
+          {drawing.lines.map(line =>
+            line.id === undefined ? (
+              <Text wrap="truncate-end">{line.spans.map(paint)}</Text>
+            ) : (
+              <Button key={`agent:${line.id}`} plain onPress={open(line.id)}>
+                {line.spans.map(paint)}
+              </Button>
+            ),
+          )}
         </Box>
-        {list.length === 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text color={INK.soft}>No agents yet.</Text>
-            <Text color={INK.faint}>
-              Each one shows up here the moment it starts.
-            </Text>
-          </Box>
-        )}
-        {live.map(card)}
-        {done.length > 0 && (
-          <Text color={INK.line} wrap="truncate-end">
-            {'── '}
-            <Text color={INK.faint}>finished</Text>
-            {` ${'─'.repeat(Math.max(0, columns - 12))}`}
-          </Text>
-        )}
-        {shownDone.map(past)}
-        {done.length > 0 && (
-          <Box justifyContent="space-between">
-            <Text color={INK.faint}>
-              {hidden > 0 ? `+${hidden} more` : ' '}
-            </Text>
-            <Button
-              key="clear"
-              plain
-              dimColor
-              onPress={() => {
-                heard.clear()
-                strangers.clear()
-                enqueue($, 'finished not cleared', () =>
-                  update($, agents, held => held.filter(isLive)),
-                )
-              }}
-            >
-              clear finished
-            </Button>
-          </Box>
-        )}
       </Box>
     )
   })

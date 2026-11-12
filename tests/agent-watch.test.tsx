@@ -5,14 +5,24 @@ import {
   acted,
   arranged,
   born,
+  clip,
   describeCall,
   doing,
+  drawn,
+  GONE_MS,
+  heading,
+  plain,
   redact,
+  settled,
   span,
-  spark,
   spawned,
+  summarized,
+  SUMMARY_MS,
   synced,
+  unpathed,
 } from '../hooks/roster'
+import type { Sight } from '../hooks/roster'
+import type { AgentRow } from '../types'
 
 const PLUGIN = 'agent-watch'
 const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
@@ -25,7 +35,7 @@ const PANE = {
   props: {
     title: 'Agents',
     isFocused: false,
-    bodyColumns: 60,
+    bodyColumns: 76,
     placement: 'dock',
     scroll: { offset: 0, bodyRows: 20 },
     view: {},
@@ -68,6 +78,8 @@ type World = {
   toasts: string[]
   viewed: string[]
   opened: number
+  /** How many times a pane was closed, by anyone. */
+  closed: number
   /** False stands for a terminal too narrow to draw a pane nobody asked for. */
   isPlaced: boolean
   polls: number
@@ -87,6 +99,7 @@ function world(on: On, env: Readonly<Record<string, string>> = {}): World {
     toasts: [],
     viewed: [],
     opened: 0,
+    closed: 0,
     isPlaced: true,
     polls: 0,
     redraws: 0,
@@ -122,7 +135,11 @@ function world(on: On, env: Readonly<Record<string, string>> = {}): World {
         : { isPlaced: false, reason: 'the terminal is too narrow' },
     }
   })
-  on('ui.close', () => ({ value: undefined }))
+  on('ui.close', () => {
+    w.closed += 1
+
+    return { value: undefined }
+  })
   on('ui.log', () => ({ value: undefined }))
   on('ui.invalidate', () => {
     w.redraws += 1
@@ -161,7 +178,7 @@ test('an agent shows what it is doing, from its spawn to its answer', async ($, 
   on('tool.call', async () => {
     await clock.settle()
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    midCall = (await ui.find({ type: 'Text', text: /Bash/ }))?.text
+    midCall = (await ui.find({ type: 'Text', text: /Running/ }))?.text
     await ui.unmount()
 
     return { result: {} }
@@ -173,7 +190,7 @@ test('an agent shows what it is doing, from its spawn to its answer', async ($, 
   await $.tool.call({ tool: 'Bash', command: 'pytest -x', agentId: 'a1' })
   await clock.settle()
 
-  expect(midCall).toContain('Bash: pytest -x')
+  expect(midCall).toContain('Running pytest -x')
   expect(w.opened).toBe(1)
   // The open pane says who is working: the status line never repeats it.
   expect(w.status).not.toContain('1 agent working')
@@ -184,9 +201,11 @@ test('an agent shows what it is doing, from its spawn to its answer', async ($, 
 
     expect(row?.text).toContain('Explore')
     expect(row?.text).toContain('find the auth flow')
-    expect(await ui.find({ type: 'Text', text: /thinking/ })).toBeDefined()
+    // The call is over: it is still named, in the past, where "thinking" was.
+    expect(await ui.find({ type: 'Text', text: /Ran pytest -x/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /thinking/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /1 tool/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /1 working/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /1 running/ })).toBeDefined()
     await ui.unmount()
   }
 
@@ -196,8 +215,9 @@ test('an agent shows what it is doing, from its spawn to its answer', async ($, 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const how = await ui.find({ type: 'Text', text: /Login lives/ })
 
-  expect(how?.text).toContain('1 tool · 1.5k tok')
+  expect(how?.text).toContain('Login lives in auth/session.py.')
   expect((await ui.find({ key: 'agent:a1' }))?.text).toContain('✓')
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toContain('1 tool')
   expect(await ui.find({ type: 'Text', text: /1 done/ })).toBeDefined()
   expect(w.status.at(-1)).toBeUndefined()
   await ui.unmount()
@@ -211,7 +231,7 @@ test('a tool call is never made to wait on the pane', async ($, on) => {
   // Reached before anything is folded: the mod passed the call straight on.
   on('tool.call', async () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    rowsAtCall = (await ui.find({ type: 'Text', text: /Bash: ls/ })) ? 1 : 0
+    rowsAtCall = (await ui.find({ type: 'Text', text: /Running ls/ })) ? 1 : 0
     await ui.unmount()
 
     return { result: {} }
@@ -259,7 +279,7 @@ test('an agent the mod never heard spawn is picked up from the roster', async ($
   on('tool.call', async () => {
     await clock.settle()
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-    midCall = (await ui.find({ type: 'Text', text: /Grep/ }))?.text
+    midCall = (await ui.find({ type: 'Text', text: /Searching/ }))?.text
     await ui.unmount()
 
     return { result: {} }
@@ -278,7 +298,7 @@ test('an agent the mod never heard spawn is picked up from the roster', async ($
   await $.tool.call({ tool: 'Grep', pattern: 'TODO', path: 'src', agentId: 'b7' })
   await clock.settle()
 
-  expect(midCall).toContain('Grep: TODO')
+  expect(midCall).toContain('Searching for TODO')
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const row = await ui.find({ key: 'agent:b7' })
@@ -296,7 +316,11 @@ test('a credential in a command never reaches the pane', async ($, on) => {
 
   on('tool.call', async () => {
     await clock.settle()
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const ui = await $.ui.mount({
+      ...PANE,
+      props: { ...PANE.props, placement: 'inline', bodyColumns: 160 },
+      surface: 'terminal',
+    })
     midCall = (await ui.find({ type: 'Text', text: /curl/ }))?.text ?? ''
     await ui.unmount()
 
@@ -334,7 +358,7 @@ test('the roster poll shows waiting and stopped, then the clock stops', async ($
   await clock.advance(3000)
 
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /waiting on background work/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Waiting on background work/ })).toBeDefined()
   await ui.unmount()
 
   w.roster = [{ ...listed, status: 'killed' }]
@@ -342,7 +366,7 @@ test('the roster poll shows waiting and stopped, then the clock stops', async ($
 
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ key: 'agent:a1' }))?.text).toContain('■')
-  expect(await ui.find({ type: 'Text', text: /stopped/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Stopped/ })).toBeDefined()
   expect(w.status.at(-1)).toBeUndefined()
   await ui.unmount()
 
@@ -499,7 +523,7 @@ test('with no screen the rows are kept, and no pane or clock is started', async 
   expect(w.opened).toBe(0)
 })
 
-test('a long answer is cut short so the counts after it stay on the row', async ($, on) => {
+test('a long answer is one short line that never runs past the pane', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
 
@@ -509,16 +533,18 @@ test('a long answer is cut short so the counts after it stay on the row', async 
   await clock.settle()
 
   for (const placement of ['dock', 'inline'] as const) {
-    const ui = await $.ui.mount({
-      ...PANE,
-      props: { ...PANE.props, placement },
-      surface: 'terminal',
-    })
-    const how = await ui.find({ type: 'Text', text: /The login flow/ })
+    for (const bodyColumns of [40, 76, 160]) {
+      const ui = await $.ui.mount({
+        ...PANE,
+        props: { ...PANE.props, placement, bodyColumns },
+        surface: 'terminal',
+      })
+      const how = await ui.find({ type: 'Text', text: /The login flow/ })
 
-    expect(how?.text.endsWith('… · 0 tools · 1.5k tok')).toBe(true)
-    expect(how?.text.length).toBeLessThanOrEqual(PANE.props.bodyColumns)
-    await ui.unmount()
+      expect(how?.text).toContain('…')
+      expect(how?.text.trimEnd().length).toBeLessThanOrEqual(bodyColumns)
+      await ui.unmount()
+    }
   }
 })
 
@@ -556,26 +582,97 @@ test("the model's snapshot tool reads the same roster", async ($, on) => {
   expect(String(ran.result)).toContain('1 tool')
 })
 
-test('finished agents are cleared on a press, working ones stay', async ($, on) => {
+test('a pane the mod opened closes itself once the work is done', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
 
   await $.session.start(SESSION)
   await $.agent.spawn(SPAWN)
+  await clock.settle()
+  // An agent is at work: however long it takes, the pane stays.
+  await clock.advance(60_000)
+  expect(w.closed).toBe(0)
+
   await $.turn.complete(DONE)
+  await clock.settle()
+
+  // The result stays a moment to be read: there is no link to press.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'clear' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Login lives/ })).toBeDefined()
+  await ui.unmount()
+  await clock.advance(5000)
+  expect(w.closed).toBe(0)
+
+  await clock.advance(20_000)
+  expect(w.closed).toBe(1)
+
+  // Closed by the mod, not by the person: the next agent opens it again.
+  const opened = w.opened
   w.nextId = 'a2'
   await $.agent.spawn({ ...SPAWN, tool_use_id: 'toolu_2', description: 'write tests' })
   await clock.settle()
+  expect(w.opened).toBe(opened + 1)
+})
 
-  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'clear' })
+test('a pane the person asked for stays open when the work is done', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+  await $.command.run({
+    command: 'agent-watch',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: true, columns: 160 },
+  })
+  await $.turn.complete(DONE)
+  await clock.settle()
+  await clock.advance(120_000)
+
+  expect(w.closed).toBe(0)
+
+  // The finished agent is still listed, and the clock has stopped.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toContain('✓')
   await ui.unmount()
+
+  const redraws = w.redraws
+  await clock.advance(30_000)
+  expect(w.redraws).toBe(redraws)
+})
+
+test("the engine's own handback call is said in plain words and not counted", async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  let midCall: string | undefined
+
+  on('tool.call', async (_, e) => {
+    // In no list of tools the types know: the engine's own, seen only live.
+    if ((e.tool as string) === 'SubagentHandback') {
+      await clock.settle()
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+      midCall = (await ui.find({ key: 'agent:a1' }))?.text
+      await ui.unmount()
+    }
+
+    return { result: {} }
+  })
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await $.tool.call({ tool: 'Read', file_path: '/repo/notes.txt', agentId: 'a1' })
+  await $.tool.call({ tool: 'SubagentHandback', agentId: 'a1' } as never)
   await clock.settle()
 
-  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
-  expect(await ui.find({ key: 'agent:a2' })).toBeDefined()
-  expect(await ui.find({ key: 'clear' })).toBeUndefined()
+  expect(midCall).toContain('Reporting back')
+  expect(midCall).not.toContain('SubagentHandback')
+  expect(midCall).toContain('1 tool')
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toContain('Reported back · 1 tool')
   await ui.unmount()
 })
 
@@ -760,18 +857,54 @@ test('code and flags that only name a secret are left as written', () => {
   }
 })
 
-test('a tool call reads in a few words', () => {
+test('a tool call reads as a person would say it', () => {
   expect(
     describeCall('Read', { file_path: 'C:\\repo\\app\\core\\config.py' }),
-  ).toBe('Read: core/config.py')
-  expect(
-    describeCall('mcp__firecrawl__firecrawl_search', { query: 'claude hooks' }),
-  ).toBe('firecrawl:firecrawl_search: claude hooks')
+  ).toBe('Reading config.py')
+  expect(describeCall('Edit', { file_path: '/repo/app/main.py' })).toBe('Editing main.py')
+  expect(describeCall('Glob', { pattern: '**/*.txt' })).toBe('Searching **/*.txt')
+  expect(describeCall('Grep', { pattern: 'TODO', path: 'src' })).toBe('Searching for TODO')
   expect(
     describeCall('Bash', { command: 'npm test\n  --watch', description: 'Run tests' }),
-  ).toBe('Bash: npm test --watch')
-  expect(describeCall('TaskList', {})).toBe('TaskList')
+  ).toBe('Running npm test --watch')
+  expect(describeCall('WebFetch', { url: 'https://docs.example.com/a/b?c=1' })).toBe(
+    'Fetching docs.example.com',
+  )
+  expect(
+    describeCall('mcp__firecrawl__firecrawl_search', { query: 'claude hooks' }),
+  ).toBe('Using firecrawl search: claude hooks')
+  expect(describeCall('TaskList', {})).toBe('Checking the task list')
   expect(describeCall('Bash', { command: 'x'.repeat(200) }).length).toBe(72)
+})
+
+test('no internal tool name and no full folder path reaches a row', () => {
+  expect(describeCall('SubagentHandback', {})).toBe('Reporting back')
+  expect(describeCall('NotebookRead', { notebook_path: '/home/me/lab/run.ipynb' })).toBe(
+    'Using notebook read: run.ipynb',
+  )
+  expect(
+    describeCall('Bash', {
+      command: 'pytest C:\\Users\\me\\AppData\\Local\\Temp\\job\\tests -x',
+    }),
+  ).toBe('Running pytest tests -x')
+  expect(describeCall('Read', { file_path: '/var/lib/app/data/notes.txt' })).toBe(
+    'Reading notes.txt',
+  )
+  expect(unpathed('see ~/.claude/mods/agent-watch/hooks/roster.ts for it')).toBe(
+    'see roster.ts for it',
+  )
+  // A link, a glob and a path with no root are not folder paths.
+  expect(unpathed('https://example.com/a/b/c src/**/*.ts core/config.py')).toBe(
+    'https://example.com/a/b/c src/**/*.ts core/config.py',
+  )
+})
+
+test('a call that is over is said in the past', () => {
+  expect(settled('Reading notes.txt')).toBe('Read notes.txt')
+  expect(settled('Searching for TODO')).toBe('Searched for TODO')
+  expect(settled('Running pytest -x')).toBe('Ran pytest -x')
+  expect(settled('Reporting back')).toBe('Reported back')
+  expect(settled('Using firecrawl search: hooks')).toBe('Used firecrawl search: hooks')
 })
 
 test('time reads as a person says it', () => {
@@ -787,12 +920,16 @@ test('a silent agent reads as quiet, a long tool call shows its own clock', () =
   const slow = born('a2', now - 300_000, {
     seenAt: now - 45_000,
     inFlight: 1,
-    activity: 'Bash: pytest',
+    activity: 'Running pytest',
   })
 
-  expect(doing(silent, now)).toBe('quiet for 2m 10s')
-  expect(doing(slow, now)).toBe('Bash: pytest · 45s')
-  expect(doing(born('a3', now), now)).toBe('thinking')
+  expect(doing(silent, now)).toBe('Quiet for 2m 10s')
+  expect(doing(slow, now)).toBe('Running pytest · 45s')
+  // No call yet, or the last one over: never a bare "thinking".
+  expect(doing(born('a3', now), now)).toBe('Starting')
+  expect(doing(born('a4', now, { activity: 'Reading notes.txt' }), now)).toBe(
+    'Read notes.txt',
+  )
 })
 
 test('the roster ends a listed agent it drops, and never revives an ended one', () => {
@@ -883,7 +1020,7 @@ test('agents that name each other as parent are still shown', () => {
   expect(arranged(ring).map(({ row }) => row.id).sort()).toEqual(['a', 'b'])
 })
 
-test('inline above the prompt the rows stay bare, on every surface', async ($, on) => {
+test('in a narrow pane the row folds, on every surface', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   on('tool.call', () => ({ result: {} }))
@@ -891,7 +1028,6 @@ test('inline above the prompt the rows stay bare, on every surface', async ($, o
   await $.session.start(SESSION)
   await $.agent.spawn(SPAWN)
   await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
-  await $.turn.complete(DONE)
   await clock.settle()
 
   for (const surface of SURFACES) {
@@ -900,22 +1036,326 @@ test('inline above the prompt the rows stay bare, on every surface', async ($, o
       props: { ...PANE.props, placement: 'inline', bodyColumns: 30 },
       surface,
     })
+    const row = await ui.find({ key: 'agent:a1' })
 
-    expect(await ui.find({ type: 'Text', text: /AGENTS/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /finished/ })).toBeDefined()
-    expect((await ui.find({ key: 'agent:a1' }))?.text).toContain('Explore')
+    expect(await ui.find({ type: 'Text', text: /Agents/ })).toBeDefined()
+    expect(row?.text).toContain('Explore')
+    // What it did sits on the line beneath, not squeezed into the row.
+    expect(row?.text).not.toContain('Ran ls')
+    expect(await ui.find({ type: 'Text', text: /Ran ls · 1 tool/ })).toBeDefined()
     await ui.unmount()
   }
 })
 
-test('the activity strip stands tall where the calls were', () => {
-  const now = 1_000_000
-  const row = born('a1', 0, { calls: [now - 65_000, now - 6000, now - 5000] })
+// --- The pane's lines, read back as plain text ------------------------------
 
-  // Twelve ten-second slots, newest at the right: one call a minute ago,
-  // two in the last ten seconds.
-  expect(spark(row, now)).toBe('▁▁▁▁▁▂▁▁▁▁▁▃')
-  expect(spark(born('a2', 0), now)).toBe('▁'.repeat(12))
+const NOW = 1_800_000_000_000
+/** The docked pane the mod asks for, less a clear column each side. */
+const DOCK: Sight = { columns: 74, rows: 40, isDocked: true, isPinned: false }
+/** The band above the prompt in a 170-column terminal. */
+const INLINE: Sight = { columns: 166, rows: 12, isDocked: false, isPinned: false }
+
+/** A row as the mod holds it, `ago` ms into its run. */
+const agent = (
+  id: string,
+  known: Partial<AgentRow> = {},
+  ago = 11_000,
+): AgentRow =>
+  born(id, NOW - ago, {
+    type: 'Explore',
+    description: 'List words in each .txt file',
+    seenAt: NOW,
+    ...known,
+  })
+
+/** Two at work (one mid-call, one between calls) and two just finished. */
+const FOUR: AgentRow[] = [
+  agent('a1', { inFlight: 1, activity: 'Reading menu.txt', tools: 8 }),
+  agent('a2', {
+    type: 'general-purpose',
+    description: 'Count lines in each .txt file',
+    activity: 'Searching *.txt',
+    tools: 8,
+  }),
+  agent('a3', {
+    description: 'Find mango mentions in .txt files',
+    state: 'completed',
+    endedAt: NOW - 1000,
+    tools: 11,
+    answer: 'Mango appears in fruit.txt, menu.txt and notes.txt.',
+  }),
+  agent('a4', {
+    type: 'Plan',
+    description: 'Propose three-step Thursday plan',
+    state: 'completed',
+    endedAt: NOW - 5000,
+    tools: 3,
+    answer: 'Calibrate the multimeter, run the audit, then check the sign.',
+  }),
+]
+
+const textOf = (line: { spans: readonly { text: string }[] }): string =>
+  line.spans.map(span => span.text).join('')
+
+test('each agent is one aligned row, exactly as wide as the pane', () => {
+  for (const sight of [DOCK, INLINE]) {
+    const drawing = drawn(FOUR, NOW, sight)
+    const rows = drawing.lines.filter(line => line.id !== undefined)
+
+    // Working agents first, then the finished ones, the newest on top.
+    expect(rows.map(line => line.id)).toEqual(['a1', 'a2', 'a3', 'a4'])
+    // Every row fills the pane to its last column: the times end in line.
+    expect(rows.map(line => textOf(line).length)).toEqual(
+      rows.map(() => sight.columns),
+    )
+    expect(rows.map(line => textOf(line).slice(-3))).toEqual([
+      '11s',
+      '11s',
+      '10s',
+      ' 6s',
+    ])
+
+    // The type, the task and what it is doing each start on one column.
+    const starts = rows.map(line => {
+      let at = 0
+
+      return line.spans
+        .slice(0, 3)
+        .map(span => (at += span.text.length))
+        .join(',')
+    })
+
+    expect(new Set(starts).size).toBe(1)
+    expect(plain(drawing).every(line => line.length <= sight.columns)).toBe(true)
+  }
+})
+
+test('the header is one quiet line, and nothing is boxed, barred or branded', () => {
+  for (const sight of [DOCK, INLINE, { ...DOCK, columns: 40 }]) {
+    const lines = plain(drawn(FOUR, NOW, sight))
+
+    expect(lines[0]).toBe('Agents  2 running · 2 done')
+    expect(lines.join('\n')).not.toMatch(/[▁▂▃▄▅▆▇█╭╮╰╯│─Δ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/)
+    expect(lines.join('\n')).not.toMatch(/thinking|clear finished|finished ─/)
+  }
+
+  const mixed = [
+    agent('b1'),
+    agent('b2', { state: 'waiting' }),
+    agent('b3', { state: 'idle' }),
+    agent('b4', { state: 'completed', endedAt: NOW }),
+    agent('b5', { state: 'failed', endedAt: NOW }),
+    agent('b6', { state: 'killed', endedAt: NOW }),
+  ]
+
+  expect(heading(mixed)).toBe(
+    '1 running · 1 waiting · 1 idle · 1 done · 1 failed · 1 stopped',
+  )
+  expect(plain(drawn([], NOW, DOCK))).toEqual(['Agents  No agents yet'])
+})
+
+test('the one accent marks an agent at work and nothing else', () => {
+  const drawing = drawn(
+    [
+      ...FOUR,
+      agent('a5', { state: 'waiting' }),
+      agent('a6', {
+        state: 'failed',
+        endedAt: NOW - 500,
+        answer: 'The API refused the request.',
+      }),
+    ],
+    NOW,
+    INLINE,
+  )
+  const accented = drawing.lines.flatMap(line =>
+    line.spans
+      .filter(span => span.tone === 'pulse')
+      .map(span => `${line.id}:${span.text.trim()}`),
+  )
+  const row = (id: string) => drawing.lines.find(line => line.id === id)
+
+  expect(accented).toEqual(['a1:●', 'a2:●'])
+  expect(drawing.head.some(span => span.tone === 'pulse')).toBe(false)
+  // Type in bold, task a step down, the time faint: weight and brightness.
+  expect(row('a1')?.spans.slice(1, 3).map(span => span.tone)).toEqual([
+    'strong',
+    'soft',
+  ])
+  expect(row('a1')?.spans.at(-1)?.tone).toBe('faint')
+  // A finished row is faint from its check mark to its time.
+  expect(row('a3')?.spans[0]?.text).toBe('✓ ')
+  expect(row('a3')?.spans.every(span => span.tone === 'faint')).toBe(true)
+  // A failed one is told apart by its mark and its brightness, not a color.
+  expect(row('a6')?.spans[0]).toEqual({ text: '✗ ', tone: 'soft' })
+  expect(textOf(row('a6') ?? { spans: [] })).toContain('The API refused the request.')
+})
+
+test('the call in flight reads bright, the last one faint and in the past', () => {
+  for (const sight of [DOCK, INLINE]) {
+    const [busy, between] = drawn(FOUR, NOW, sight).lines
+    const said = (line: typeof busy, opening: string) =>
+      line?.spans.find(span => span.text.startsWith(opening))?.tone
+
+    expect(said(busy, 'Reading menu.txt')).toBe('bright')
+    expect(said(between, 'Searched *.txt')).toBe('faint')
+  }
+
+  // Inline there is room for the tool count beside it.
+  const inline = plain(drawn(FOUR, NOW, INLINE))
+
+  expect(inline[1]).toContain('Reading menu.txt · 8 tools')
+  expect(inline[2]).toContain('Searched *.txt · 8 tools')
+})
+
+test('the columns hold still as the clocks run', () => {
+  const young = [agent('a1', {}, 3000), agent('a2', { type: 'Plan' }, 9000)]
+  const starts = (ms: number): number[] =>
+    drawn(young, NOW + ms, DOCK).lines.map(line => line.spans[0]?.text.length ?? 0).concat(
+      drawn(young, NOW + ms, DOCK).lines.map(line => line.spans[2]?.text.length ?? 0),
+    )
+
+  // 3s and 9s on the clocks, then 13s and 19s: the task column is as wide.
+  expect(starts(0)).toEqual(starts(10_000))
+})
+
+test('before its first call an agent says so, with no empty count', () => {
+  const lines = plain(drawn([agent('a1')], NOW, INLINE))
+
+  expect(lines[1]).toContain('Starting')
+  expect(lines[1]).not.toContain('0 tools')
+})
+
+test('one agent is one row and ten agents are ten rows, docked and inline', () => {
+  const ten = Array.from({ length: 10 }, (_, i) =>
+    agent(`a${i}`, {
+      description: `Review module number ${i}`,
+      inFlight: 1,
+      activity: 'Reading notes.txt',
+      tools: i,
+    }),
+  )
+
+  for (const sight of [DOCK, INLINE]) {
+    const one = plain(drawn(ten.slice(0, 1), NOW, sight))
+    const all = plain(drawn(ten, NOW, sight))
+
+    expect(one.length).toBe(2)
+    expect(one[0]).toBe('Agents  1 running')
+    expect(all.length).toBe(11)
+    expect(all[0]).toBe('Agents  10 running')
+    expect(all.slice(1).every(line => line.length === sight.columns)).toBe(true)
+  }
+})
+
+test('more agents than the pane has rows: the rest are counted, never cut', () => {
+  const twenty = Array.from({ length: 20 }, (_, i) =>
+    agent(`a${i}`, { description: `Review module number ${i}` }),
+  )
+  const lines = plain(drawn(twenty, NOW, { ...INLINE, rows: 8 }))
+
+  expect(lines.length).toBe(8)
+  expect(lines.at(-1)).toBe('  +14 more running')
+
+  // Finished agents: the newest few, then a count of the earlier ones.
+  const finished = Array.from({ length: 9 }, (_, i) =>
+    agent(`d${i}`, { state: 'completed', endedAt: NOW - i * 1000 }),
+  )
+  const past = plain(drawn(finished, NOW, { ...INLINE, rows: 30 }))
+
+  expect(past[0]).toBe('Agents  9 done')
+  expect(past.length).toBe(7)
+  expect(past.at(-1)).toBe('  +4 earlier')
+})
+
+test('a pane too narrow for the columns folds each row instead of crushing it', () => {
+  const sight = { ...DOCK, columns: 46 }
+  const drawing = drawn(FOUR, NOW, sight)
+  const lines = plain(drawing)
+
+  expect(lines.every(line => line.length <= 46)).toBe(true)
+  // Who it is and how long on one line; what it is doing on the line beneath.
+  expect(drawing.lines.map(line => line.id)).toEqual([
+    'a1',
+    undefined,
+    'a2',
+    undefined,
+    'a3',
+    undefined,
+    'a4',
+    undefined,
+  ])
+  expect(lines[1]?.startsWith('● Explore')).toBe(true)
+  expect(lines[1]?.endsWith('11s')).toBe(true)
+  expect(lines[2]).toBe('  Reading menu.txt · 8 tools')
+  expect(lines[4]).toBe('  Searched *.txt · 8 tools')
+  expect(lines[3]).toContain('general-purpose')
+})
+
+test('a finished agent fades, its result closes to the row, and it leaves by itself', () => {
+  const done = agent('a1', {
+    state: 'completed',
+    endedAt: NOW,
+    tools: 4,
+    answer: 'Login lives in session.py.',
+  })
+  const at = (ms: number, sight: Sight = DOCK): string[] =>
+    plain(drawn([done], NOW + ms, sight))
+
+  // Just finished: the result has a line of its own under the row.
+  expect(at(1000).length).toBe(3)
+  expect(at(1000)[1]).toContain('4 tools')
+  expect(at(1000)[2]).toBe('  Login lives in session.py.')
+  // Read by now: the row alone.
+  expect(at(SUMMARY_MS + 1000).length).toBe(2)
+  expect(at(SUMMARY_MS + 1000)[1]?.startsWith('✓ Explore')).toBe(true)
+  // Later it is gone from a pane nobody asked for, with no link to press...
+  expect(at(GONE_MS + 1000)).toEqual(['Agents  None running'])
+  // ...and stays listed in one the person opened.
+  expect(at(GONE_MS + 1000, { ...DOCK, isPinned: true }).length).toBe(2)
+  // Inline there is room: the result rides on the row, the count after it.
+  expect(at(1000, INLINE).length).toBe(2)
+  expect(at(1000, INLINE)[1]).toContain('Login lives in session.py. · 4 tools')
+})
+
+test('a result is one line of about 80 letters, with folder paths cut', () => {
+  const line = summarized(
+    'Found 8 .txt files directly in C:\\Users\\me\\AppData\\Local\\Temp\\job\\aw-scratch. ' +
+      'Line counts (each file ends with a trailing newline, so the count is the number of text lines): fruit 6.',
+  )
+
+  expect(line.startsWith('Found 8 .txt files directly in aw-scratch. Line counts')).toBe(true)
+  expect(line.length).toBeLessThanOrEqual(80)
+  expect(line.endsWith('…')).toBe(true)
+  expect(line).not.toContain('Users')
+  // The marks of a heading, a list and emphasis are not part of the result.
+  expect(summarized('## Result\n- **Three** files mention `mango`.')).toBe(
+    'Result Three files mention mango.',
+  )
+  expect(summarized('token=hunter2 was used')).toBe('token=*** was used')
+})
+
+test('text is cut at a word, with no stray mark before the ellipsis', () => {
+  expect(clip('Count lines in each .txt file', 20)).toBe('Count lines in each…')
+  expect(clip('Find mango mentions in .txt files', 20)).toBe('Find mango mentions…')
+  expect(clip('List words, then sort', 12)).toBe('List words…')
+  // A scrap of a word is dropped; most of a word is kept and marked.
+  expect(clip('List words in each .txt file', 18)).toBe('List words in…')
+  expect(clip('Find mango mentions in .txt files', 18)).toBe('Find mango mentio…')
+  expect(clip('supercalifragilistic', 10)).toBe('supercali…')
+  expect(clip('short', 10)).toBe('short')
+  expect(clip('anything', 0)).toBe('')
+})
+
+test('a child agent sits in under its parent without breaking the columns', () => {
+  const family = [
+    agent('lead', { type: 'general-purpose', description: 'Run the review' }),
+    agent('kid', { parentId: 'lead', description: 'Read the diff' }, 5000),
+  ]
+  const lines = plain(drawn(family, NOW, INLINE))
+
+  expect(lines[1]?.startsWith('● general-purpose  Run the review')).toBe(true)
+  expect(lines[2]?.startsWith('●   Explore        Read the diff')).toBe(true)
 })
 
 test("the mod's clock is the real one", () => {

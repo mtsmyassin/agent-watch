@@ -203,7 +203,63 @@ export function brief(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
-const DETAIL = [
+/**
+ * A text cut to `room` letters for a cell: at a word's end where that keeps
+ * most of the room, with no stray space or comma left before the mark.
+ */
+export function clip(text: string, room: number): string {
+  if (room <= 0) {
+    return ''
+  }
+
+  if (text.length <= room) {
+    return text
+  }
+
+  const head = text.slice(0, room - 1)
+  // A cut that leaves only a scrap of a word (`in eac…`) drops the scrap.
+  const isMidWord = /\S/.test(text.charAt(room - 1)) && /\S$/.test(head)
+  const space = head.lastIndexOf(' ')
+  const scrap = head.length - space - 1
+  const kept = isMidWord && space > 0 && scrap <= 3 ? head.slice(0, space) : head
+
+  return `${kept.replace(/[\s.,;:·(–-]+$/, '')}…`
+}
+
+/** A folder path with a drive or a share in front: `C:\a\b\c.txt`, `\\pc\share\x`. */
+const DRIVE_PATH =
+  /(?:\b[A-Za-z]:|\\\\[\w.$-]+)[\\/]+(?:[^\\/\s"'`<>|*?]+[\\/]+)*([^\\/\s"'`<>|*?]*)/g
+/** A rooted path of two folders or more; a link's own slashes are left alone. */
+const ROOT_PATH = /(?<![\w:/.~-])~?\/(?:[\w.@%+-]+\/)+([\w.@%+-]*)/g
+
+const lastFolder = (path: string): string =>
+  path.split(/[\\/]+/).filter(part => part !== '').pop() ?? path
+
+/** Every full folder path in a text, down to its last name: `C:\a\b\c.txt` reads `c.txt`. */
+export function unpathed(text: string): string {
+  const named = (whole: string, last: string): string =>
+    last === '' ? lastFolder(whole) : last
+
+  return text.replace(DRIVE_PATH, named).replace(ROOT_PATH, named)
+}
+
+/** A file as a person names it: the name alone, never its folders. */
+const fileName = (path: string): string => lastFolder(path.trim())
+
+/** `https://docs.example.com/a/b?c` reads `docs.example.com`. */
+const host = (url: string): string =>
+  url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[/?#]/)[0] ?? url
+
+/** `NotebookRead` and `firecrawl_search` as words: `notebook read`, `firecrawl search`. */
+const worded = (name: string): string =>
+  name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .toLowerCase()
+
+/** What a tool call is about, for a tool this file has no sentence for. */
+const SUBJECT = [
   'command',
   'file_path',
   'notebook_path',
@@ -214,36 +270,166 @@ const DETAIL = [
   'description',
   'skill',
   'subject',
-  'prompt',
 ] as const
 
-const tail = (path: string): string =>
-  path
-    .split(/[\\/]/)
-    .filter(part => part !== '')
-    .slice(-2)
-    .join('/')
+/**
+ * The engine's own bookkeeping calls: an agent handing its answer back is
+ * not work it did, so it is named in plain words and left out of the count.
+ */
+const BOOKKEEPING: Readonly<Record<string, string>> = {
+  SubagentHandback: 'Reporting back',
+  StructuredOutput: 'Writing the result',
+}
 
-/** A tool call in a few words: `Bash: pytest -x`, `Read: core/config.py`. */
+export const isBookkeeping = (tool: string): boolean => tool in BOOKKEEPING
+
+/** Calls that need no detail to be understood. */
+const PLAIN: Readonly<Record<string, string>> = {
+  ...BOOKKEEPING,
+  ToolSearch: 'Looking up tools',
+  TodoWrite: 'Updating the task list',
+  TaskCreate: 'Updating the task list',
+  TaskUpdate: 'Updating the task list',
+  TaskList: 'Checking the task list',
+  TaskGet: 'Checking the task list',
+  AskUserQuestion: 'Asking a question',
+  EnterPlanMode: 'Planning',
+  ExitPlanMode: 'Presenting the plan',
+  SendMessage: 'Sending a message',
+}
+
+/**
+ * A tool call as a person would say it: `Reading notes.txt`, `Searching
+ * *.txt`, `Running pytest -x`. Never the tool's internal name, never a full
+ * folder path.
+ */
 export function describeCall(
   tool: string,
   input: Readonly<Record<string, unknown>>,
 ): string {
-  const name = tool.startsWith('mcp__')
-    ? tool.split('__').slice(1).join(':')
-    : tool
-
-  for (const field of DETAIL) {
+  const text = (field: string): string => {
     const value = input[field]
 
-    if (typeof value === 'string' && value.trim() !== '') {
-      const detail = field.endsWith('path') ? tail(value) : value
+    return typeof value === 'string' ? value.trim() : ''
+  }
+  const say = (verb: string, what: string): string =>
+    brief(what === '' ? verb : `${verb} ${what}`, 72)
+  const file = fileName(
+    text('file_path') || text('notebook_path') || text('path'),
+  )
+  const plain = PLAIN[tool]
 
-      return brief(`${name}: ${detail}`, 72)
+  if (plain !== undefined) {
+    return plain
+  }
+
+  switch (tool) {
+    case 'Read':
+      return say('Reading', file)
+    case 'Write':
+      return say('Writing', file)
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return say('Editing', file)
+    case 'Glob':
+      return say('Searching', unpathed(text('pattern')))
+    case 'Grep':
+      return say('Searching for', unpathed(text('pattern')))
+    case 'Bash':
+    case 'PowerShell':
+      return say('Running', unpathed(text('command')))
+    case 'WebFetch':
+      return say('Fetching', host(text('url')))
+    case 'WebSearch':
+      return say('Searching the web for', text('query'))
+    case 'Agent':
+    case 'Task':
+      return say('Starting an agent:', text('description'))
+    case 'Skill':
+      return say('Using the skill', text('skill'))
+  }
+
+  const [server = '', ...rest] = tool.startsWith('mcp__')
+    ? tool.split('__').slice(1)
+    : []
+  // `mcp__firecrawl__firecrawl_search` is `firecrawl search`, said once.
+  const action = worded(rest.join(' '))
+  const name =
+    server === ''
+      ? worded(tool)
+      : action.startsWith(worded(server))
+        ? action
+        : `${worded(server)} ${action}`.trim()
+
+  for (const field of SUBJECT) {
+    const value = text(field)
+
+    if (value !== '') {
+      const subject = field.endsWith('path')
+        ? fileName(value)
+        : field === 'url'
+          ? host(value)
+          : unpathed(value)
+
+      return say(`Using ${name}:`, subject)
     }
   }
 
-  return brief(name, 72)
+  return say('Using', name)
+}
+
+/** Each sentence's opening as it reads once the call is over. */
+const SETTLED: readonly (readonly [string, string])[] = [
+  ['Searching the web for', 'Searched the web for'],
+  ['Searching for', 'Searched for'],
+  ['Searching', 'Searched'],
+  ['Reading', 'Read'],
+  ['Writing', 'Wrote'],
+  ['Editing', 'Edited'],
+  ['Running', 'Ran'],
+  ['Fetching', 'Fetched'],
+  ['Starting', 'Started'],
+  ['Using', 'Used'],
+  ['Looking up', 'Looked up'],
+  ['Updating', 'Updated'],
+  ['Checking', 'Checked'],
+  ['Asking', 'Asked'],
+  ['Planning', 'Planned'],
+  ['Presenting', 'Presented'],
+  ['Sending', 'Sent'],
+  ['Reporting back', 'Reported back'],
+]
+
+/** A call that is over, in the past: `Reading notes.txt` reads `Read notes.txt`. */
+export function settled(activity: string): string {
+  for (const [now, then] of SETTLED) {
+    if (activity.startsWith(now)) {
+      return `${then}${activity.slice(now.length)}`
+    }
+  }
+
+  return activity
+}
+
+/** How long an agent's result reads in the pane. */
+const SUMMARY_MAX = 80
+
+/**
+ * An agent's answer as one line of about 80 letters: its opening, with the
+ * marks of a list or a heading dropped, folder paths cut to their last name,
+ * and anything shaped like a credential masked.
+ */
+export function summarized(answer: string): string {
+  const flat = answer
+    .slice(0, SCANNED)
+    .replace(/```[\s\S]*?(?:```|$)/g, ' ')
+    .replace(/^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+/gm, '')
+    .replace(/[*`]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return clip(redact(unpathed(flat)), SUMMARY_MAX)
 }
 
 /** A length of time as a person reads it: `42s`, `3m 05s`, `1h 12m`. */
@@ -354,12 +540,16 @@ export function woke(
   return change(list, id, row => ({ ...revived(row, now), inFlight: 0 }))
 }
 
-/** The agent started a tool call. */
+/**
+ * The agent started a tool call. The engine's bookkeeping calls are shown
+ * while they run and left out of the count: `isCounted` false.
+ */
 export function acted(
   list: readonly AgentRow[],
   id: string,
   activity: string,
   now: number,
+  isCounted = true,
 ): AgentRow[] {
   return change(list, id, row => {
     const next: AgentRow = {
@@ -367,8 +557,7 @@ export function acted(
       seenAt: now,
       activity,
       inFlight: row.inFlight + 1,
-      tools: row.tools + 1,
-      calls: [...(row.calls ?? []), now].slice(-CALLS_KEPT),
+      tools: row.tools + (isCounted ? 1 : 0),
     }
 
     // A call folded after the agent's end is counted; it brings nothing back.
@@ -420,7 +609,7 @@ export function ended(
 ): AgentRow[] {
   return change(list, id, row => {
     const state = stateAfter(ending.reason, row.isTeammate)
-    const answer = brief(ending.answer, 160)
+    const answer = summarized(ending.answer)
     const next: AgentRow = {
       ...row,
       state,
@@ -599,34 +788,6 @@ export function headline(list: readonly AgentRow[]): string {
     .join(' · ')
 }
 
-/** How many tool calls' start times a row keeps for its activity strip. */
-const CALLS_KEPT = 24
-const BARS = '▁▂▃▄▅▆▇█'
-const STRIP_BUCKETS = 12
-const STRIP_BUCKET_MS = 10_000
-
-/**
- * The agent's tool calls over its last two minutes as a strip of bars, the
- * newest at the right: a burst reads tall, a lull flat.
- */
-export function spark(row: AgentRow, now: number): string {
-  const counts = new Array<number>(STRIP_BUCKETS).fill(0)
-
-  for (const at of row.calls ?? []) {
-    const age = Math.floor((now - at) / STRIP_BUCKET_MS)
-
-    if (age >= 0 && age < STRIP_BUCKETS) {
-      const slot = STRIP_BUCKETS - 1 - age
-
-      counts[slot] = (counts[slot] ?? 0) + 1
-    }
-  }
-
-  return counts
-    .map(n => BARS[Math.min(n, BARS.length - 1)] ?? '')
-    .join('')
-}
-
 /** The status line's text while any agent works; undefined clears it. */
 export function statusText(list: readonly AgentRow[]): string | undefined {
   const working = list.filter(isBusy).length
@@ -642,21 +803,32 @@ export function statusText(list: readonly AgentRow[]): string | undefined {
 export const isQuiet = (row: AgentRow, now: number): boolean =>
   row.state === 'running' && row.inFlight === 0 && now - row.seenAt >= QUIET_MS
 
-/** What the agent is doing now, or how it ended, in one line. */
-export function doing(row: AgentRow, now: number): string {
+/**
+ * How bright a piece of a row is drawn. `pulse` is the one accent, kept for
+ * an agent at work; everything else is weight and brightness.
+ */
+export type Tone = 'strong' | 'bright' | 'soft' | 'faint' | 'pulse'
+
+type Said = { text: string; tone: Tone }
+
+/**
+ * What the agent is doing now, or how it ended, and how loud that is said:
+ * the call in flight reads bright, the last call (in the past) reads faint.
+ */
+function said(row: AgentRow, now: number): Said {
   switch (row.state) {
     case 'pending':
-      return 'not started yet'
+      return { text: 'Not started yet', tone: 'faint' }
     case 'waiting':
-      return 'waiting on background work or approval'
+      return { text: 'Waiting on background work or approval', tone: 'bright' }
     case 'idle':
-      return 'idle until a message wakes it'
+      return { text: 'Idle until a message wakes it', tone: 'faint' }
     case 'completed':
-      return row.answer ?? 'finished'
+      return { text: row.answer ?? 'Finished', tone: 'faint' }
     case 'failed':
-      return row.answer ?? 'failed'
+      return { text: row.answer ?? 'Failed', tone: 'soft' }
     case 'killed':
-      return row.answer ?? 'stopped'
+      return { text: row.answer ?? 'Stopped', tone: 'soft' }
     case 'running':
       break
   }
@@ -664,14 +836,28 @@ export function doing(row: AgentRow, now: number): string {
   if (row.inFlight > 0 && row.activity !== undefined) {
     const held = now - row.seenAt
 
-    return held >= SLOW_CALL_MS
-      ? `${row.activity} · ${span(held)}`
-      : row.activity
+    return {
+      text:
+        held >= SLOW_CALL_MS
+          ? `${row.activity} · ${span(held)}`
+          : row.activity,
+      tone: 'bright',
+    }
   }
 
-  return isQuiet(row, now)
-    ? `quiet for ${span(now - row.seenAt)}`
-    : 'thinking'
+  if (isQuiet(row, now)) {
+    return { text: `Quiet for ${span(now - row.seenAt)}`, tone: 'soft' }
+  }
+
+  return {
+    text: row.activity === undefined ? 'Starting' : settled(row.activity),
+    tone: 'faint',
+  }
+}
+
+/** What the agent is doing now, or how it ended, in one line. */
+export function doing(row: AgentRow, now: number): string {
+  return said(row, now).text
 }
 
 /** The row's clock: how long it has run, or how long it ran. */
@@ -704,4 +890,362 @@ export function report(list: readonly AgentRow[], now: number): string {
   })
 
   return [headline(list), ...lines].join('\n')
+}
+
+// --- The pane, line by line -------------------------------------------------
+//
+// One aligned row per agent: a mark, its type, its task, what it is doing and
+// how long it has run. Weight and brightness carry the order of things; the
+// only color is the mark of an agent at work. Nothing here knows the engine,
+// so every line can be read back as plain text in a test.
+
+/** A piece of one line and how bright it is drawn. */
+export type Span = { text: string; tone: Tone }
+/** One line of the pane: an agent's row, pressed by its `id`, or a note. */
+export type Line = { id?: string; spans: Span[] }
+/** What the pane has to draw in: its room, where it sits, who opened it. */
+export type Sight = {
+  columns: number
+  rows: number
+  isDocked: boolean
+  /** True when the person asked for the pane: finished agents stay listed. */
+  isPinned: boolean
+}
+export type Drawing = { head: Span[]; lines: Line[] }
+
+/** How long a finished agent's result stays on a line of its own. */
+export const SUMMARY_MS = 30_000
+/** How long a finished agent stays in a pane nobody asked for. */
+export const GONE_MS = 120_000
+/** The finished agents listed at once; the rest are a count. */
+const FINISHED_KEPT = 5
+const GAP = '  '
+const TYPE_MAX = 15
+const TASK_MIN = 16
+const DETAIL_MIN = 18
+/** What the activity column takes before the task gets more: `Reading notes.txt · 7 tools`. */
+const DETAIL_WANT = 28
+/** From this width a finished agent's result rides on its own row. */
+const RESULT_MIN = 44
+
+const MARK: Record<AgentState, string> = {
+  pending: '○',
+  running: '●',
+  waiting: '○',
+  idle: '○',
+  completed: '✓',
+  failed: '✗',
+  killed: '■',
+}
+
+/** The header's count of what is in sight: `2 running · 2 done`. */
+export function heading(rows: readonly AgentRow[]): string {
+  const count = (states: readonly AgentState[]): number =>
+    rows.filter(row => states.includes(row.state)).length
+  const counts: readonly (readonly [number, string])[] = [
+    [count(['pending', 'running']), 'running'],
+    [count(['waiting']), 'waiting'],
+    [count(['idle']), 'idle'],
+    [count(['completed']), 'done'],
+    [count(['failed']), 'failed'],
+    [count(['killed']), 'stopped'],
+  ]
+
+  return counts
+    .filter(([n]) => n > 0)
+    .map(([n, word]) => `${n} ${word}`)
+    .join(' · ')
+}
+
+type Shape = {
+  type: number
+  task: number
+  detail: number
+  time: number
+  isFolded: boolean
+}
+
+/**
+ * The widths of a row's columns, from the widest type, task and time in
+ * sight. Where the pane is too narrow to hold them all the row folds: who it
+ * is and how long on one line, what it is doing on the line beneath.
+ */
+export function shaped(
+  columns: number,
+  type: number,
+  task: number,
+  time: number,
+): Shape {
+  const flexible = columns - 2 - type - time - GAP.length * 3
+
+  if (flexible >= TASK_MIN + DETAIL_MIN) {
+    // What the agent is doing is the news, so its column is served first;
+    // the task, which the engine's own list also names, takes the rest.
+    const kept = Math.max(TASK_MIN, Math.min(task, flexible - DETAIL_WANT))
+
+    return { type, task: kept, detail: flexible - kept, time, isFolded: false }
+  }
+
+  const room = Math.max(8, columns - 2 - time - GAP.length * 2)
+  const narrow = Math.min(type, Math.max(4, Math.floor(room * 0.45)))
+
+  return {
+    type: narrow,
+    task: Math.max(4, room - narrow),
+    detail: Math.max(8, columns - 2),
+    time,
+    isFolded: true,
+  }
+}
+
+/** The agent's type as its row names it: a plugin's prefix dropped. */
+const typeName = (row: AgentRow): string =>
+  row.type.slice(row.type.lastIndexOf(':') + 1) || row.type
+
+/** `7 tools`; nothing at all before the first call, where a zero says nothing. */
+const counted = (row: AgentRow): string =>
+  row.tools === 0 ? '' : `${row.tools} ${row.tools === 1 ? 'tool' : 'tools'}`
+
+const cell = (text: string, width: number): string =>
+  clip(text, width).padEnd(width)
+
+/**
+ * A cell's words with the tool count after them. Where both do not fit, a
+ * result gives way to keep the count (`isCountKept`); live activity is kept
+ * whole and the count waits for room.
+ */
+function withCount(
+  words: Said,
+  count: string,
+  width: number,
+  isCountKept: boolean,
+): Span[] {
+  const tail = ` · ${count}`
+  const room = width - tail.length
+
+  if (count === '' || (words.text.length > room && (!isCountKept || room < 8))) {
+    return [{ text: cell(words.text, width), tone: words.tone }]
+  }
+
+  const text = clip(words.text, room)
+
+  return [
+    { text, tone: words.tone },
+    { text: tail.padEnd(width - text.length), tone: 'faint' },
+  ]
+}
+
+/** How loud a row is: bold and bright while live, faint once done. */
+function look(row: AgentRow, now: number): { mark: Tone; type: Tone; task: Tone } {
+  if (row.state === 'running') {
+    return {
+      mark: isQuiet(row, now) ? 'faint' : 'pulse',
+      type: 'strong',
+      task: 'soft',
+    }
+  }
+
+  if (isLive(row)) {
+    return { mark: 'soft', type: 'strong', task: 'soft' }
+  }
+
+  return row.state === 'completed'
+    ? { mark: 'faint', type: 'faint', task: 'faint' }
+    : { mark: 'soft', type: 'soft', task: 'faint' }
+}
+
+type Placed = { seat: Seated; indent: number }
+
+/** One agent's line, and the line under it where the row folds or just ended. */
+function rowLines(
+  { seat, indent }: Placed,
+  shape: Shape,
+  columns: number,
+  time: string,
+  now: number,
+): Line[] {
+  const { row } = seat
+  const tones = look(row, now)
+  const words = said(row, now)
+  const count = counted(row)
+  const isOver = !isLive(row)
+  const isFresh = isOver && now - (row.endedAt ?? now) < SUMMARY_MS
+  const lead: Span[] = [
+    { text: `${MARK[row.state]} `, tone: tones.mark },
+    {
+      text: `${cell(`${'  '.repeat(indent)}${typeName(row)}`, shape.type)}${GAP}`,
+      tone: tones.type,
+    },
+    { text: `${cell(row.description, shape.task)}${GAP}`, tone: tones.task },
+  ]
+  const clock: Span = { text: time.padStart(shape.time), tone: 'faint' }
+  const gap: Span = { text: GAP, tone: 'faint' }
+  // A line under a row sits in under the type and ends where its words do.
+  const under = (spans: Span[]): Line => ({
+    spans: [
+      { text: '  ', tone: 'faint' },
+      ...spans.map((span, at) =>
+        at === spans.length - 1 ? { ...span, text: span.text.trimEnd() } : span,
+      ),
+    ],
+  })
+
+  if (shape.isFolded) {
+    const first: Line = { id: row.id, spans: [...lead, clock] }
+
+    // A finished agent's result is read, then its row closes to one line.
+    return row.state === 'completed' && !isFresh
+      ? [first]
+      : [first, under(withCount(words, count, columns - 2, true))]
+  }
+
+  if (!isOver || shape.detail >= RESULT_MIN) {
+    return [
+      {
+        id: row.id,
+        spans: [...lead, ...withCount(words, count, shape.detail, isOver), gap, clock],
+      },
+    ]
+  }
+
+  if (row.state !== 'completed') {
+    return [
+      {
+        id: row.id,
+        spans: [
+          ...lead,
+          { text: cell(words.text, shape.detail), tone: words.tone },
+          gap,
+          clock,
+        ],
+      },
+    ]
+  }
+
+  const line: Line = {
+    id: row.id,
+    spans: [...lead, { text: cell(count, shape.detail), tone: 'faint' }, gap, clock],
+  }
+
+  return isFresh && row.answer !== undefined
+    ? [line, under([{ text: clip(row.answer, columns - 2), tone: 'faint' }])]
+    : [line]
+}
+
+/**
+ * The pane as lines of text: the header, a row per agent at work, then the
+ * agents that just finished, newest first. A finished agent leaves by itself
+ * after a while unless the person asked for the pane.
+ */
+export function drawn(
+  list: readonly AgentRow[],
+  now: number,
+  sight: Sight,
+): Drawing {
+  const columns = Math.max(24, sight.columns)
+  const seated = arranged(list)
+  const live = seated.filter(({ row }) => isLive(row))
+  const over = seated.filter(
+    ({ row }) =>
+      !isLive(row) &&
+      (sight.isPinned || now - (row.endedAt ?? now) < GONE_MS),
+  )
+  const head: Span[] = [{ text: 'Agents', tone: 'strong' }]
+
+  if (live.length + over.length === 0) {
+    head.push({
+      text: list.length === 0 ? '  No agents yet' : '  None running',
+      tone: 'faint',
+    })
+
+    return { head, lines: [] }
+  }
+
+  head.push({
+    text: `  ${heading([...live, ...over].map(({ row }) => row))}`,
+    tone: 'faint',
+  })
+
+  /** A child sits in under its parent, when the parent is in sight. */
+  const placed = (section: readonly Seated[]): Placed[] =>
+    section.map(seat => {
+      const parentId = seat.row.parentId
+      const isUnderParent =
+        parentId !== undefined && section.some(one => one.row.id === parentId)
+
+      return { seat, indent: isUnderParent ? Math.min(seat.depth, 3) : 0 }
+    })
+  const working = placed(live)
+  const ended = placed(over)
+  const everyone = [...working, ...ended]
+  const times = new Map(
+    everyone.map(({ seat }) => [seat.row.id, elapsed(seat.row, now)]),
+  )
+  const widest = (lengths: readonly number[]): number => Math.max(1, ...lengths)
+  const shape = shaped(
+    columns,
+    Math.min(
+      TYPE_MAX,
+      widest(everyone.map(one => typeName(one.seat.row).length + one.indent * 2)),
+    ),
+    widest(everyone.map(one => one.seat.row.description.length)),
+    // Three wide from the start, so nothing shifts when a clock reaches 10s.
+    Math.max(3, widest([...times.values()].map(time => time.length))),
+  )
+  const lines: Line[] = []
+  const note = (text: string): Line => ({
+    spans: [{ text: `  ${text}`, tone: 'faint' }],
+  })
+  const draw = (one: Placed): Line[] =>
+    rowLines(one, shape, columns, times.get(one.seat.row.id) ?? '', now)
+  // The header takes a row, and docked a clear row follows it.
+  let room = Math.max(3, sight.rows - 1 - (sight.isDocked ? 1 : 0))
+  const perRow = shape.isFolded ? 2 : 1
+  const fitting =
+    working.length * perRow <= room
+      ? working.length
+      : Math.max(1, Math.floor((room - 1) / perRow))
+
+  for (const one of working.slice(0, fitting)) {
+    lines.push(...draw(one))
+  }
+
+  if (fitting < working.length) {
+    lines.push(note(`+${working.length - fitting} more running`))
+
+    return { head, lines }
+  }
+
+  room -= fitting * perRow
+
+  let shown = 0
+
+  for (const one of ended.slice(0, FINISHED_KEPT)) {
+    const rows = draw(one)
+    // A row is kept for the count of what is left out, unless nothing is.
+    const spare = room - (shown === ended.length - 1 ? 0 : 1)
+    const kept = rows.length <= spare ? rows : spare >= 1 ? rows.slice(0, 1) : []
+
+    if (kept.length === 0) {
+      break
+    }
+
+    lines.push(...kept)
+    room -= kept.length
+    shown += 1
+  }
+
+  if (shown < ended.length && room >= 1) {
+    lines.push(note(`+${ended.length - shown} earlier`))
+  }
+
+  return { head, lines }
+}
+
+/** A drawing as the plain text a screen shows, one string a line. */
+export function plain(drawing: Drawing): string[] {
+  const text = (spans: readonly Span[]): string =>
+    spans.map(span => span.text).join('')
+
+  return [text(drawing.head), ...drawing.lines.map(line => text(line.spans))]
 }
