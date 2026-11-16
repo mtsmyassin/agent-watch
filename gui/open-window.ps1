@@ -18,6 +18,7 @@ public delegate bool EnumProc(IntPtr h, IntPtr l);
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+[DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")] public static extern uint ProcessOf(IntPtr h, out uint pid);
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
 [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
@@ -30,15 +31,15 @@ public delegate bool EnumProc(IntPtr h, IntPtr l);
   exit 0
 }
 
-# The visible windows whose title starts with $Title (the page's own title).
-function Titled() {
+# The visible top-level windows; with $Title, only those whose title starts with it.
+function Visible([string]$Prefix = '') {
   $found = New-Object System.Collections.Generic.List[IntPtr]
   $each = [AgentWatchOpen.Win+EnumProc] {
     param($h, $l)
     if ($w::IsWindowVisible($h)) {
       $text = New-Object System.Text.StringBuilder 256
       [void]$w::GetWindowText($h, $text, 256)
-      if ($text.ToString().StartsWith($Title)) { $found.Add($h) }
+      if ($Prefix -eq '' -or $text.ToString().StartsWith($Prefix)) { $found.Add($h) }
     }
     $true
   }
@@ -46,9 +47,18 @@ function Titled() {
   return $found.ToArray()
 }
 
+# True for a window of Edge's that was not there before the launch.
+function IsNewEdge([IntPtr]$h) {
+  if ($h -eq [IntPtr]::Zero -or $all -contains $h) { return $false }
+  $id = [uint32]0
+  [void]$w::ProcessOf($h, [ref]$id)
+  return $id -ne 0 -and (Get-Process -Id $id -ErrorAction SilentlyContinue).ProcessName -eq 'msedge'
+}
+
 $before = $w::GetForegroundWindow()
-# Another session's agents window is not this one.
-$old = @(Titled)
+# Every window there before: another session's agents window, or one of your own, is not this one.
+$all = @(Visible)
+$old = @(Visible $Title)
 Start-Process -FilePath 'msedge' -ArgumentList @("--app=$Url", "--window-size=$Size")
 
 $win = [IntPtr]::Zero
@@ -56,19 +66,20 @@ $until = (Get-Date).AddSeconds(10)
 $settled = $null
 while ((Get-Date) -lt $until) {
   Start-Sleep -Milliseconds 40
-  if ($win -eq [IntPtr]::Zero) {
-    $new = @(Titled) | Where-Object { $old -notcontains $_ } | Select-Object -First 1
-    if ($new) { $win = $new; $settled = (Get-Date).AddMilliseconds(900) }
-    continue
-  }
-  # It may take the foreground a moment after it shows: hand it back each time.
+  # The new window may take the foreground before its title has loaded, and again a
+  # moment after it shows: whenever a new Edge window has it, hand it straight back.
   $now = $w::GetForegroundWindow()
-  if ($now -eq $win -and $before -ne [IntPtr]::Zero -and $before -ne $win) {
+  if ($before -ne [IntPtr]::Zero -and $now -ne $before -and (IsNewEdge $now)) {
     $mine = $w::GetCurrentThreadId()
-    $theirs = $w::GetWindowThreadProcessId($win, [IntPtr]::Zero)
+    $theirs = $w::GetWindowThreadProcessId($now, [IntPtr]::Zero)
     [void]$w::AttachThreadInput($mine, $theirs, $true)
     [void]$w::SetForegroundWindow($before)
     [void]$w::AttachThreadInput($mine, $theirs, $false)
+  }
+  if ($win -eq [IntPtr]::Zero) {
+    $new = @(Visible $Title) | Where-Object { $old -notcontains $_ } | Select-Object -First 1
+    if ($new) { $win = $new; $settled = (Get-Date).AddMilliseconds(900) }
+    continue
   }
   if ((Get-Date) -ge $settled) { break }
 }
