@@ -265,3 +265,20 @@ the repo).
 14. **An independent review** of the two parsers (before run A) found false-alarm inputs; all that could raise a wrong
     flag or a wrong correction were fixed with tests (commit "Close the review's false alarms"). Left as misses: a `<<`
     inside `$(( ))` stops the reader at that line's end; bash `>&file` is read as a stream copy.
+15. **Live run A (12:04, key unset, three Haiku agents)**: the circles sign came at 40.6 s, the narrator's advice
+    landed at 44.6 s, and the agent looped on until about 158 s (24 reads of config.txt and 23 of notes.txt against a
+    brief of 20). Refreshes landed every 30 s while it looped. The evidence count tracked the trail every 2 s (`Read
+    config.txt 23 times` at 23). Every count the narrator wrote matched the tally it was sent: 5 reads (3 + 2), 16 and
+    18 config.txt reads (the tally counts one failed read of config.txt; the 19th read came 2 s after that ask), and
+    24 / 23 at the end. 15 calls, 0 failed, 0 cut, 1 correction.
+16. **Two fixes after run A** (commit "Check \"16 config.txt reads\"..."): the checker missed the form "16 config.txt
+    reads", now read; and the one correction swapped a finished agent's finding for its own answer, which held the
+    agent's wrong count ("I ran 20 sequential reads") uncapped. Now only the findings that miscount go, and the stand-in
+    is the last finished step, capped. These run on the final code only in tests; run A ran the code before them.
+17. **Live run B (12:13, key left set)**: first a header-only launch that typed nothing ("Haiku 5.5 · Claude Max"),
+    then the real run, whose first step waits for `Haiku 5.5 · Claude Max` in the header and would have stopped the
+    harness, typing nothing, had it not come. It came at 1.0 s. Footer: "Narrator (Haiku) · on your Max plan · 6 calls
+    · 6.1k tokens in · 891 out". No file in the evidence, the runtime folder or the worktree holds the key or its tail
+    (checked in memory, nothing printed).
+18. Run A's terminal scenario waited for "Agents  3 done", which never showed: the pane had closed itself by then. The
+    data file sampler and the filmed page cover the whole run; the terminal's last screen is `timeout-step9`.
