@@ -40,6 +40,13 @@ with the vendored Motion 14.12.0, Python + Playwright gui-sim harness (outside t
   the evidence; a progress line and a thin bar labeled "estimate" (transform only, still under reduced motion); a
   fourth hover section "What to do"; advice in the banner next to the name; one new "trouble" count chip.
 - WCAG 2 AA, axe 0 violations; DESIGN.md colours (crimson #E5383B for trouble, small text #A1A1A6).
+- Addendum (owner, 2026-11-16), overriding the above where they differ: `CALLS_MAX` 400; failures back off 1, 2, 5,
+  then every 5 minutes instead of stopping the session (sign-in errors too); the narrator runs only when the session
+  does not pay per call (footer: "Narrator off: this session pays per call. It runs only on your Max plan." /
+  "Narrator (Haiku) · on your Max plan · N calls"); an env key counts as in use only when its last 20 characters are
+  in `customApiKeyResponses.approved`; the key is never printed, logged, stored or sent. "now" at most 12 words; what,
+  how, progress, advice up to 40 words; found up to 3 findings; grounding rule ("Not clear yet"); low effort; no reply
+  cut at the cap. `autoOpenWindow` default true, opened without taking the keyboard where possible.
 
 ## Review Focus
 
@@ -160,7 +167,69 @@ with the vendored Motion 14.12.0, Python + Playwright gui-sim harness (outside t
 - [ ] **Step 4: Run all tests, `tsc`, `claude plugin validate .`: pass.**
 - [ ] **Step 5: Commit** `Note each call's step and any risky change, and hand the narrator the longer brief`.
 
-### Task 4: The window shows trouble, progress and what to do
+### Task 4: Always on, on the Max plan only (addendum 1, 2)
+
+**Files:**
+- Create: `hooks/billing.ts` (pure: the money guard)
+- Modify: `hooks/narrator.ts` (`CALLS_MAX` 400; back-off in place of the session stop), `hooks/register.tsx`
+  (the guard once per session start; the narrator plans only when it says the plan pays), `types/index.d.ts`
+  (`Ledger.pauses?`, `Ledger.pausedUntil?`, `Ledger.pauseWhy?`, `Ledger.cut?`; `Cards['narrator']` `state` gains
+  `'paused'`, optional `plan?`, `until?`, `cut?`)
+- Modify (design-driven): the existing tests that pin 80 calls or the session stop.
+- Test: `tests/billing.test.tsx`, `tests/always-on.test.tsx`
+
+**Interfaces:**
+- Produces: `Access = { isPaid: false; plan: string } | { isPaid: true; why: string }`;
+  `accessOf(signals: Signals): Access` with `Signals = { credential?: 'bearer' | 'api-key' | 'none'; thirdParty:
+  boolean; envTails: string[]; approved: string[]; planType?: string; hasLogin: boolean }`; `tail(key: string):
+  string` (last 20); `configFacts(text: string): { approved: string[]; planType?: string; hasLogin: boolean }`
+  (reads only `customApiKeyResponses.approved` and `oauthAccount`); `PAID_WHY` = "Narrator off: this session pays per
+  call. It runs only on your Max plan."; `BACKOFF_MS = [60_000, 120_000, 300_000]` then every 300 000;
+  `cardsOf(rows, trails, held, now, isEnabled, access?)`.
+
+- [ ] **Step 1: Failing tests:** `the session's own credential decides: a claude.ai login runs, a key or a cloud
+  provider pays` (bearer -> runs, plan from `oauthAccount.organizationType`; api-key, none, Bedrock/Vertex/Foundry ->
+  paid); `with no answer from the engine, the config file decides as Claude Code does` (env key whose tail is
+  approved -> paid; rejected or unknown tail with a login -> runs; neither -> paid); `the config file is read for two
+  fields only, and the key is never kept` (fixture with other fields and a full key: `configFacts` returns only the
+  tails list and the plan type); `failures back off 1, 2, 5, then every 5 minutes, and never stop the session`
+  (fatal refusal, sign-in error, engine refusal, three in a row; asks resume after the pause; a success resets);
+  `400 calls a session` (the 400th sets halt); wiring: `on a paid session the narrator makes no call and the footer
+  says why`, `on the Max login it runs and names the plan`, `the key reaches no file, prompt or log`.
+- [ ] **Step 2: Run, see them fail.**
+- [ ] **Step 3: Implement.** `$.session.authorize()` first (its `kind` only; the handle is dropped at once), then the
+  env switches, the env keys' tails and the config file, once per session start; any read that fails counts as
+  unknown, and unknown with no login is paid. Until the guard has answered, the narrator makes no call.
+- [ ] **Step 4: Run all tests and `tsc`: pass. List every existing test changed.**
+- [ ] **Step 5: Commit** `Keep the narrator on, on the Max plan only: back off instead of stopping`.
+
+### Task 5: Right and detailed (addendum 3)
+
+**Files:** `hooks/narrator.ts`, `hooks/register.tsx` (request `effort`), `types/index.d.ts`; test
+`tests/detail.test.tsx`.
+
+- [ ] **Step 1: Failing tests:** `now stays glanceable and the hover fields run fuller` (now cut to 12 words; what,
+  how, progress, advice kept to about 40 words, cut at 320 letters; found keeps up to 3 findings);
+  `both system prompts hold the grounding rule` ("Not clear yet", never guess, name what was read or changed, the
+  data rule kept); `the request asks for low effort and room for the whole reply` (`effort: 'low'`,
+  `MAX_TOKENS` 1024); `a reply cut at the cap is counted` (`output_tokens` >= cap -> `ledger.cut` + 1, shown in
+  `cards.narrator.cut`).
+- [ ] **Step 2-4:** fail, implement, pass (`tsc` too).
+- [ ] **Step 5: Commit** `Ask for grounded, fuller words, at low effort, with room to finish`.
+
+### Task 6: The window opens by itself, without taking the keyboard (addendum 4)
+
+**Files:** `.claude-plugin/plugin.json` (`autoOpenWindow` default true), `hooks/register.tsx` (`launch`), tests in
+`tests/insight-wiring.test.tsx`.
+
+- [ ] **Step 1:** Find a launch that opens the Edge app window without activating it (no new dependency); try it by
+  hand on this PC with a scratch page.
+- [ ] **Step 2: Failing test:** `two agents at work open the window once, by itself, in the background` (the
+  `process.run` argv the mod sends; once per session).
+- [ ] **Step 3-4:** implement, pass.
+- [ ] **Step 5: Commit** `Open the window by itself at two agents, without taking the keyboard`.
+
+### Task 7: The window shows trouble, progress and what to do
 
 **Files:**
 - Modify: `gui/index.html`
@@ -176,9 +245,12 @@ with the vendored Motion 14.12.0, Python + Playwright gui-sim harness (outside t
 - [ ] **Step 4:** `axe_prep.py`, then axe on `cards.html`, `cards-pinned.html`, `timeline.html`: 0 violations.
 - [ ] **Step 5: Commit** `Draw trouble, progress and what to do on the cards`.
 
-### Task 5: Proof and docs
+### Task 8: Proof and docs
 
 - [ ] `claude plugin validate .`, `claude plugin test .`, `tsc -p .` clean.
+- [ ] In the live run: the window opens by itself at 2 agents while the harness types in the terminal; the typed
+  text lands in the terminal. Every narrator line checked against that agent's real calls; replies cut at the cap
+  counted from the data file.
 - [ ] Live run (`aw-insight.json`, the memory file's recipe, `--tools "Agent,Read,Glob,Grep"`), one agent told to read
   the same file five times one at a time; `live_insight.py` films the page: circles trouble, narrator advice,
   progress line and bar, cost line; count the narrator calls from the data file. Screenshots to

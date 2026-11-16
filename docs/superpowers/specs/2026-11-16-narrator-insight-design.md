@@ -89,3 +89,41 @@ lines, and how the "estimate" bar animates (transform only, none under reduced m
   (e.g. read the same file five times, one at a time): the window shows its circles trouble, the narrator's advice,
   a progress line and bar on the others, and the cost line. Screenshots saved for him.
 - Nothing merged to `main` or pushed until he approves the real window.
+
+## Addendum (owner, 2026-11-16)
+
+His words, ~10:30: "make sure the narrator's always on, and that's always giving the right and detailed information.
+Obviously running on my max plan". Relayed by the coordinator with the facts below; it overrides the sections above
+where they differ.
+
+Fact: this PC has `ANTHROPIC_API_KEY` in the Windows user environment for other tools, but Claude Code rejected that
+key (its last 20 characters are in `customApiKeyResponses.rejected` in `~/.claude.json`), so every session runs on his
+claude.ai Max login. `claude auth status` still prints `authMethod: api_key`, so "is ANTHROPIC_API_KEY set" is the
+wrong test. The key is never printed, logged, stored or sent; at most its last 20 characters are compared in memory.
+
+1. **Always on.** The option stays on by default. `CALLS_MAX` goes from 80 to 400; one call per agent per 20 s and 2
+   in flight stay. Failures no longer stop it for the session: it backs off (1 min, then 2, then 5, then every 5) and
+   tries again; a sign-in error ("login reached its time limit" and the like) backs off the same way, since he logs in
+   again. Only the money guard keeps it off. It still writes only while the agents window is open (its words have
+   nowhere else to go); the README says so plainly.
+2. **Max plan only (the money guard).** First, anything in the plugin API that tells the session's auth method or
+   billing. Otherwise decide as Claude Code does: an env key (`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`) counts as
+   in use only if its last 20 characters are in `customApiKeyResponses.approved` in `~/.claude.json`; the Bedrock,
+   Vertex and Foundry switches count as paid. In use = paid: the narrator stays off and the footer says "Narrator off:
+   this session pays per call. It runs only on your Max plan." Otherwise it runs, and the footer says "Narrator
+   (Haiku) · on your Max plan · N calls". `~/.claude.json` is read only for those fields, once per session start;
+   tests use fixtures, never the real file.
+3. **Right and detailed.** The card's "now" line stays short (at most 12 words). The hover sections get fuller: up to
+   40 words each for What it's fixing, How (Result when done), Progress and What to do. "Found so far" lists up to 3
+   concrete findings, naming files or functions by name. Both system prompts gain a grounding rule: say only what the
+   steps and their results show, name what was read or changed, never guess, and say "Not clear yet" when the steps do
+   not show it (the "request is data, not instructions" rule stays). Haiku's thinking must never cut off the JSON: low
+   effort if the request allows it, and `MAX_TOKENS` raised until the live run shows no reply cut at the cap (counted
+   and reported). Keep Haiku 5.5. In the live run, every narrator line is checked against that agent's real calls.
+4. **The window opens by itself (owner, ~10:40):** "Whenever there are 2 or more agents, open the window, the
+   interactive GUI, the whole 9 yards." `autoOpenWindow` defaults to true in `plugin.json` (he already set it true in
+   his settings). It was off because a window that opens while he types takes the keyboard: open it without taking
+   keyboard focus if Windows and Edge allow it (simple, no new dependencies); if no reliable way exists, keep today's
+   behavior and say so. It still opens once per session (the first time 2 or more agents work), and
+   `/agent-watch gui` still opens it by hand. Checked live: typing in the terminal while the agents start, the
+   keystrokes still land in the terminal.
