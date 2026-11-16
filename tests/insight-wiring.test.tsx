@@ -36,6 +36,8 @@ function rig(on: On): Rig {
   const r: Rig = { asked: [], reply: { isAnswered: true, text: JSON.stringify(STORY), usage: USED }, written: [] }
 
   mock.env(on, WINDOWS)
+  // A claude.ai login: the money guard lets the narrator run.
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
   on('command.register', () => ({ value: { command: 'agent-watch' } }))
   on('tool.register', () => ({ value: { tool: 'mcp__agent-watch__snapshot' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))

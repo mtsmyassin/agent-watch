@@ -23,6 +23,7 @@ import type {
 import { healthOf, kindNow, plainOf, SLOW_MS, stageOf, steadyKind, STUCK_MS } from './infer'
 import { brief, clip, isLive, redact, span, typeName, unpathed } from './roster'
 import type { Trails } from './trail'
+import type { Access } from './billing'
 import { troubleOf } from './trouble'
 
 /** The small model that writes the cards. */
@@ -45,16 +46,18 @@ export const TEAM_SETTLE_MS = 5_000
 export const START_WAIT_MS = 8_000
 /** Calls out at once. */
 export const IN_FLIGHT_MAX = 2
-/** Calls in a session; past it, the rules only. */
-export const CALLS_MAX = 80
+/** Calls in a session; past it, the rules only. On a Max plan a long session must not go quiet. */
+export const CALLS_MAX = 400
 /** The longest any field the narrator writes may read. */
 export const FIELD_MAX = 200
-/** Failures in a row that stop the narrator for the session. */
+/** Failures in a row that pause the narrator. */
 export const FAILS_IN_A_ROW = 3
+/** How long each pause in a row lasts: 1 minute, then 2, then 5, then 5 each time after. */
+export const BACKOFF_MS: readonly number[] = [60_000, 120_000, 300_000]
 /** The calls an agent's prompt shows: its newest. */
 export const RECENT = 8
 
-/** Refusals that will not clear by asking again: the narrator stops at once. */
+/** Refusals that will not clear by asking again at once: the narrator pauses on the first. */
 const FATAL: ReadonlySet<string> = new Set([
   'authentication_failed',
   'billing_error',
@@ -266,7 +269,7 @@ export function planned(
 
   const narration: Narration = { stories, ledger }
 
-  if (ledger.halt !== undefined) {
+  if (ledger.halt !== undefined || isPausedAt(ledger, now)) {
     return { narration, asks: [] }
   }
 
@@ -365,7 +368,11 @@ export function restarted(held: Narration): Narration {
   return { stories, ledger }
 }
 
-/** True while the narrator has a call out or a moment waiting: the mod keeps its beat for it. */
+/**
+ * True while the narrator has a call out or a moment waiting: the mod keeps
+ * its beat for it. A pause is not busy: while agents work the beat goes on
+ * anyway, and with none at work the moments wait for the next activity.
+ */
 export function isBusy(held: Narration): boolean {
   if (held.ledger.inFlight > 0) {
     return true
@@ -373,6 +380,7 @@ export function isBusy(held: Narration): boolean {
 
   return (
     held.ledger.halt === undefined &&
+    held.ledger.pausedUntil === undefined &&
     (held.ledger.teamPending === true || Object.values(held.stories).some(story => story.pending !== undefined))
   )
 }
@@ -925,25 +933,53 @@ export function landed(held: Narration, ask: Ask, reply: Reply, now: number): Na
 
   if (isOk) {
     ledger.inARow = 0
+    delete ledger.pauses
+    delete ledger.pausedUntil
+    delete ledger.pauseWhy
   } else {
     ledger.failed += 1
     ledger.inARow += 1
 
-    if (ledger.halt === undefined) {
-      const error = !reply.isAnswered && reply.reason === 'api-error' ? (reply.error ?? '') : ''
+    const error = !reply.isAnswered && reply.reason === 'api-error' ? (reply.error ?? '') : ''
+    // The engine refuses to send only what it will refuse again soon: a blocked model, a bad cap.
+    const isRefused = (!reply.isAnswered && reply.reason === 'refused') || FATAL.has(error)
 
-      if (!reply.isAnswered && reply.reason === 'refused') {
-        // The engine refuses to send only what it will refuse again: a blocked model, a bad cap.
-        ledger.halt = 'The engine would not send the narrator\'s call, so it stopped for this session and the cards use the plain rules.'
-      } else if (FATAL.has(error)) {
-        ledger.halt = `The narrator was refused (${error}) and stopped for this session, so the cards use the plain rules.`
-      } else if (ledger.inARow >= FAILS_IN_A_ROW) {
-        ledger.halt = 'The narrator failed three times in a row and stopped for this session, so the cards use the plain rules.'
-      }
+    // It pauses, then tries again: a failure landing during a pause does not stretch it.
+    if ((isRefused || ledger.inARow >= FAILS_IN_A_ROW) && !isPausedAt(ledger, now)) {
+      const step = ledger.pauses ?? 0
+
+      ledger.pauses = step + 1
+      ledger.pausedUntil = now + (BACKOFF_MS[Math.min(step, BACKOFF_MS.length - 1)] as number)
+      ledger.pauseWhy = pauseWhy(reply, error)
     }
   }
 
   return { stories, ledger }
+}
+
+/** True while the narrator waits out a pause after failures. */
+function isPausedAt(ledger: Ledger, now: number): boolean {
+  return ledger.pausedUntil !== undefined && now < ledger.pausedUntil
+}
+
+/** Why the narrator paused, in plain words. */
+function pauseWhy(reply: Reply, error: string): string {
+  if (!reply.isAnswered && reply.reason === 'refused') {
+    return "The engine would not send the narrator's call."
+  }
+
+  if (!FATAL.has(error)) {
+    return 'The narrator failed three times in a row.'
+  }
+
+  switch (error) {
+    case 'authentication_failed':
+      return 'The narrator could not sign in; the login may have run out. Sign in again in Claude Code if this stays.'
+    case 'billing_error':
+      return "The narrator's calls were refused for billing."
+    default:
+      return `The narrator's calls were refused (${error}).`
+  }
 }
 
 // --- What each card shows --------------------------------------------------------
@@ -960,11 +996,10 @@ function cardOf(
   row: AgentRow,
   trail: Trail | undefined,
   story: Story | undefined,
-  ledger: Ledger,
   now: number,
-  isEnabled: boolean,
+  stop: string | undefined,
 ): Card {
-  const card = wordsOf(row, trail, story, ledger, now, isEnabled)
+  const card = wordsOf(row, trail, story, now, stop)
   const trouble = troubleOf(trail?.calls ?? [], !isLive(row))
   const advice = story?.told?.advice
   const isShown = card.mode === 'told' || card.mode === 'writing'
@@ -984,14 +1019,17 @@ function cardOf(
   return card
 }
 
-/** One agent's card words: its stage, kind and quiet clock, the rules' words, and whose words show. */
+/**
+ * One agent's card words: its stage, kind and quiet clock, the rules' words,
+ * and whose words show. While the narrator is not writing (`stop` says why),
+ * its last words stay only as long as they are current.
+ */
 function wordsOf(
   row: AgentRow,
   trail: Trail | undefined,
   story: Story | undefined,
-  ledger: Ledger,
   now: number,
-  isEnabled: boolean,
+  stop: string | undefined,
 ): Card {
   const calls = trail?.calls ?? []
   const card: Card = {
@@ -1023,11 +1061,11 @@ function wordsOf(
     story.asking === undefined &&
     story.failed === undefined
 
-  if (!isEnabled || ledger.halt !== undefined) {
+  if (stop !== undefined) {
     if (isCurrent) {
       card.mode = 'told'
     } else {
-      card.why = isEnabled ? (ledger.halt as string) : OFF_WHY
+      card.why = stop
     }
 
     return card
@@ -1047,7 +1085,9 @@ function wordsOf(
 /**
  * Everything the cards need beyond the rows: each agent's card, the team
  * sentence, the health limits the page times its lights by, and the
- * narrator's account (its state, calls and cost) for the footer.
+ * narrator's account (its state, the plan it runs on, its calls and cost) for
+ * the footer. `access` is the money guard's answer: a session that pays per
+ * call keeps the narrator off, and says so.
  */
 export function cardsOf(
   rows: readonly AgentRow[],
@@ -1055,9 +1095,17 @@ export function cardsOf(
   held: Narration,
   now: number,
   isEnabled: boolean,
+  access?: Access,
 ): Cards {
   const { ledger } = held
-  const state = !isEnabled ? 'off' : ledger.halt !== undefined ? 'halted' : 'on'
+  const isPaid = access?.isPaid === true
+  const state = !isEnabled || isPaid
+    ? 'off'
+    : ledger.halt !== undefined
+      ? 'halted'
+      : isPausedAt(ledger, now)
+        ? 'paused'
+        : 'on'
   const narrator: Cards['narrator'] = {
     state,
     model: MODEL,
@@ -1070,25 +1118,39 @@ export function cardsOf(
     cacheRead: ledger.cacheRead,
     cacheWrite: ledger.cacheWrite,
   }
+  // Why the narrator is not writing now, for each card's note; none while it writes.
+  let stop: string | undefined
 
-  if (state === 'off') {
+  if (!isEnabled) {
+    stop = OFF_WHY
     narrator.why = OFF_WHY
+  } else if (access?.isPaid === true) {
+    stop = access.why
+    narrator.why = access.why
   } else if (state === 'halted') {
-    narrator.why = ledger.halt as string
+    stop = ledger.halt as string
+    narrator.why = stop
+  } else if (state === 'paused') {
+    const why = ledger.pauseWhy ?? 'The narrator failed.'
+
+    stop = `${why} It tries again shortly; meanwhile these are the plain rules.`
+    narrator.why = why
+    narrator.until = ledger.pausedUntil as number
+  }
+
+  if (access !== undefined && !access.isPaid) {
+    narrator.plan = access.plan
   }
 
   const cards: Cards = {
     narrator,
     limits: { slowMs: SLOW_MS, stuckMs: STUCK_MS },
     agents: Object.fromEntries(
-      rows.map(row => [
-        row.id,
-        cardOf(row, own(trails, row.id), own(held.stories, row.id), ledger, now, isEnabled),
-      ]),
+      rows.map(row => [row.id, cardOf(row, own(trails, row.id), own(held.stories, row.id), now, stop)]),
     ),
   }
 
-  if (isEnabled && ledger.team !== undefined) {
+  if (isEnabled && !isPaid && ledger.team !== undefined) {
     cards.team = ledger.team
   }
 

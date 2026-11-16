@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentRow } from '../types'
+import { accessOf, configFacts, tail } from './billing'
+import type { Access, Signals } from './billing'
 import { kindOf, outOf } from './infer'
 import { BRIEF_MAX, cardsOf, EMPTY, isBusy as isNarrating, landed, planned, restarted } from './narrator'
 import type { Ask, Reply } from './narrator'
@@ -194,6 +196,12 @@ let serial = 0
 let isNarratorOn = true
 /** True while a narrator plan waits its turn: a burst of changes shares it. */
 let isPlanQueued = false
+/**
+ * The money guard's answer for this session, looked up once at its start:
+ * the narrator runs only on a plan that does not pay per call. Undefined
+ * until it has looked, and the narrator waits until then.
+ */
+let access: Access | undefined
 
 function debug($: EngineInterface, what: string, error: unknown): void {
   $.ui.log(`${NAME}: ${what}: ${String(error)}`, { to: 'debug' })
@@ -554,10 +562,82 @@ async function writeData($: EngineInterface): Promise<void> {
   const now = clock()
   const data = {
     ...payload({ id: sid, cwd }, rows, held, now),
-    cards: cardsOf(rows, held, story, now, isNarratorOn),
+    cards: cardsOf(rows, held, story, now, isNarratorOn, access),
   }
 
   await $.fs.write(filed(under, `${sid}.js`), dataFile(data))
+}
+
+// --- The money guard: the narrator runs only on a plan, never per call -------
+//
+// Asked once per session start. The engine's own answer for the credential
+// the session uses comes first; the environment and Claude Code's config file
+// stand in when it gives none. A key is never kept: only the last 20 letters
+// of each are compared, in memory, the way Claude Code itself knows them.
+
+/** True for a switch that is on: set, and not `0`, `false`, `no` or `off`. */
+const isSwitchOn = (value: string | undefined): boolean =>
+  value !== undefined && value.trim() !== '' && !/^(?:0|false|no|off)$/i.test(value.trim())
+
+/** The tail of a key in the environment, or nothing; the key itself goes no further. */
+const keyTail = (value: string | undefined): string[] =>
+  value === undefined || value.trim() === '' ? [] : [tail(value)]
+
+/** Claude Code's config file, read whole and handed on as text; '' when it cannot be read. */
+async function configText($: EngineInterface): Promise<string> {
+  const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || (await homeOf($))
+
+  if (dir === undefined || dir === '') {
+    return ''
+  }
+
+  const slash = dir.includes('\\') ? '\\' : '/'
+
+  try {
+    const text = await $.fs.read(`${dir.replace(/[\\/]+$/, '')}${slash}.claude.json`)
+
+    return typeof text === 'string' ? text : ''
+  } catch (error) {
+    debug($, 'config file not read', error)
+
+    return ''
+  }
+}
+
+/** Gathers what tells how the session is signed in, and asks the guard. */
+async function guard($: EngineInterface): Promise<Access> {
+  let credential: Signals['credential']
+
+  try {
+    const held = await $.session.authorize()
+
+    // Only the kind is kept; the handle is let go here.
+    credential = held === null ? 'none' : held.kind === 'bearer' ? 'bearer' : 'api-key'
+  } catch (error) {
+    debug($, 'credential kind not answered', error)
+  }
+
+  const thirdParty = [
+    await $.env.get('CLAUDE_CODE_USE_BEDROCK'),
+    await $.env.get('CLAUDE_CODE_USE_VERTEX'),
+    await $.env.get('CLAUDE_CODE_USE_FOUNDRY'),
+  ].some(isSwitchOn)
+  const envTails = [
+    ...keyTail(await $.env.get('ANTHROPIC_API_KEY')),
+    ...keyTail(await $.env.get('ANTHROPIC_AUTH_TOKEN')),
+  ]
+  const facts = configFacts(await configText($))
+  const signals: Signals = { thirdParty, envTails, approved: facts.approved, hasLogin: facts.hasLogin }
+
+  if (credential !== undefined) {
+    signals.credential = credential
+  }
+
+  if (facts.planType !== undefined) {
+    signals.planType = facts.planType
+  }
+
+  return accessOf(signals)
 }
 
 // --- The narrator: plain words for the cards, at the moments that matter -----
@@ -572,7 +652,7 @@ async function writeData($: EngineInterface): Promise<void> {
  * and the options leave it on.
  */
 function narrate($: EngineInterface): void {
-  if (!isNarratorOn || !isGuiOn || isPlanQueued) {
+  if (!isNarratorOn || !isGuiOn || isPlanQueued || access?.isPaid !== false) {
     return
   }
 
@@ -936,6 +1016,9 @@ export const register: Register = (on, options) => {
 
     // A reload, or a session already under way: pick the watch back up.
     enqueue($, 'start', async () => {
+      // Once per session start: may the narrator run here, at no cost per call?
+      access = await guard($)
+
       // A window opened before the reload is still fed, under the same name.
       const stored = await read($, gui)
 

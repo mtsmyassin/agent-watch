@@ -165,8 +165,14 @@ export type Ledger = {
   tokensOut: number
   cacheRead: number
   cacheWrite: number
-  /** Why the narrator stopped for the session (its budget, or a refusal that will not clear). */
+  /** Why the narrator stopped for the session: only its budget does that. */
   halt?: string
+  /** Pauses in a row since the last call that worked: each waits longer (1, 2, 5, then 5 minutes). */
+  pauses?: number
+  /** Until when the narrator waits before it tries again, after failures. */
+  pausedUntil?: number
+  /** Why it paused, in plain words. */
+  pauseWhy?: string
   team?: { text: string; at: number }
   teamPending?: true
   /** When the last moment worth a team sentence came. */
@@ -204,8 +210,12 @@ export type Card = {
 /** Everything the cards need beyond the rows: written beside `agents` in the data file. */
 export type Cards = {
   narrator: {
-    state: 'on' | 'off' | 'halted'
+    state: 'on' | 'off' | 'halted' | 'paused'
     why?: string
+    /** The plan the narrator runs on, as a person names it (`Max plan`). */
+    plan?: string
+    /** While paused: when it tries again. */
+    until?: number
     model: string
     calls: number
     limit: number

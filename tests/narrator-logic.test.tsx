@@ -116,7 +116,7 @@ test('a finished or stuck agent is asked about first', () => {
   expect(agentAsks(planned(waiting, rows, trails, T + 1000).asks)).toEqual(['a2:finish'])
 })
 
-test('one call per agent per 20 s, two in flight, 80 a session, then rules only', () => {
+test('one call per agent per 20 s, two in flight, 400 a session, then rules only', () => {
   const rows = [live('a1'), live('a2'), live('a3')]
   const trails = { a1: begun(), a2: begun(), a3: begun() }
   const first = planned(EMPTY, rows, trails, T + 1000)
@@ -137,20 +137,20 @@ test('one call per agent per 20 s, two in flight, 80 a session, then rules only'
     'a1:stage',
   ])
 
-  // The 80th call is the last one: the narrator then stops, and says why.
-  expect(CALLS_MAX).toBe(80)
+  // The 400th call is the last one: the narrator then stops, and says why.
+  expect(CALLS_MAX).toBe(400)
 
   const pair = [live('a1'), live('a2')]
   const pairTrails = { a1: begun(), a2: begun() }
   const late = holding(
     { a1: { seen: READING, pending: 'stage' }, a2: { seen: READING, pending: 'stage' } },
-    { calls: 79 },
+    { calls: 399 },
   )
   const last = planned(late, pair, pairTrails, T + 1000)
 
   expect(last.asks.length).toBe(1)
-  expect(last.narration.ledger.calls).toBe(80)
-  expect(last.narration.ledger.halt).toContain('80')
+  expect(last.narration.ledger.calls).toBe(400)
+  expect(last.narration.ledger.halt).toContain('400')
 
   const after = landed(last.narration, last.asks[0] as Ask, answer(STORY), T + 2000)
 
@@ -159,10 +159,10 @@ test('one call per agent per 20 s, two in flight, 80 a session, then rules only'
   const cards = cardsOf(pair, pairTrails, after, T + 30_000, true)
 
   expect(cards.narrator.state).toBe('halted')
-  expect(cards.narrator.why).toContain('80')
+  expect(cards.narrator.why).toContain('400')
   expect(cards.agents.a1?.mode).toBe('told')
   expect(cards.agents.a2?.mode).toBe('plain')
-  expect(cards.agents.a2?.why).toContain('80')
+  expect(cards.agents.a2?.why).toContain('400')
 })
 
 test('the team sentence waits 5 s for the dust to settle and comes at most every 30 s', () => {
@@ -300,20 +300,23 @@ test('every failure falls back to the rules: timeout, empty reply, refusal, unre
   }
 })
 
-test('a refusal that will not clear stops the narrator for the session', () => {
+test('a refusal that will not clear pauses the narrator, then it asks again', () => {
   const plan = planned(EMPTY, [live('a1')], { a1: begun() }, T + 1000)
   const back = landed(plan.narration, plan.asks[0] as Ask, refused('authentication_failed', 401), T + 2000)
 
-  expect(back.ledger.halt).toContain('authentication_failed')
-  expect(planned(back, [live('a1'), live('a2')], { a1: begun(), a2: begun() }, T + 60_000).asks).toEqual([])
-  expect(cardsOf([live('a1')], { a1: begun() }, back, T + 2000, true).narrator.state).toBe('halted')
+  expect(back.ledger.halt).toBeUndefined()
+  expect(back.ledger.pauseWhy).toMatch(/sign in/)
+  expect(planned(back, [live('a1'), live('a2')], { a1: begun(), a2: begun() }, T + 61_999).asks).toEqual([])
+  expect(planned(back, [live('a1'), live('a2')], { a1: begun(), a2: begun() }, T + 62_000).asks.length).toBe(1)
+  expect(cardsOf([live('a1')], { a1: begun() }, back, T + 2000, true).narrator.state).toBe('paused')
 })
 
-test('a call the engine will not send stops the narrator for the session', () => {
+test('a call the engine will not send pauses the narrator too', () => {
   const plan = planned(EMPTY, [live('a1')], { a1: begun() }, T + 1000)
   const back = landed(plan.narration, plan.asks[0] as Ask, { isAnswered: false, reason: 'refused', usage: NONE }, T + 1001)
 
-  expect(back.ledger.halt).toMatch(/would not send/)
+  expect(back.ledger.halt).toBeUndefined()
+  expect(back.ledger.pauseWhy).toMatch(/would not send/)
   expect(back.ledger.failed).toBe(1)
   expect(planned(back, [live('a1'), live('a2')], { a1: begun(), a2: begun() }, T + 60_000).asks).toEqual([])
 })
@@ -326,7 +329,7 @@ test('a card the narrator has not planned for yet waits, or once over shows its 
   expect(cards.agents.a2?.mode).toBe('own')
 })
 
-test('three failures in a row stop it too', () => {
+test('three failures in a row pause it too', () => {
   const ids = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7']
   const rows = ids.map(id => live(id))
   const trails = Object.fromEntries(ids.map(id => [id, begun()]))
@@ -348,7 +351,8 @@ test('three failures in a row stop it too', () => {
   expect(n.ledger.inARow).toBe(2)
   expect(n.ledger.halt).toBeUndefined()
   run(refused('overloaded', 529), T + 1006)
-  expect(n.ledger.halt).toContain('three')
+  expect(n.ledger.halt).toBeUndefined()
+  expect(n.ledger.pauseWhy).toContain('three')
 })
 
 test('an answer for an agent that is gone only counts its cost', () => {
@@ -407,7 +411,7 @@ test('the cost of every call is counted, failed ones included', () => {
     state: 'on',
     model: 'claude-haiku-5-5',
     calls: 2,
-    limit: 80,
+    limit: 400,
     inFlight: 0,
     failed: 1,
     tokensIn: 800,

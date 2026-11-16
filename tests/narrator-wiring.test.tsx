@@ -52,6 +52,8 @@ function rig(on: On, env: Readonly<Record<string, string>> = WINDOWS): Rig {
   }
 
   mock.env(on, env)
+  // A claude.ai login: the money guard lets the narrator run.
+  on('session.authorize', () => ({ value: { handle: 'h1', kind: 'bearer' } }))
   on('command.register', () => ({ value: { command: 'agent-watch' } }))
   on('tool.register', () => ({ value: { tool: 'mcp__agent-watch__snapshot' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -187,9 +189,10 @@ test("the narrator's cost is written for the footer", async ($, on) => {
 
   expect(dataOf(r).cards?.narrator).toEqual({
     state: 'on',
+    plan: 'Claude plan',
     model: 'claude-haiku-5-5',
     calls: 1,
-    limit: 80,
+    limit: 400,
     inFlight: 0,
     failed: 0,
     tokensIn: 500,
