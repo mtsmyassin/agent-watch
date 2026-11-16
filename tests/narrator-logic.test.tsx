@@ -221,7 +221,7 @@ test('what is sent is masked and framed as data', () => {
   expect(ask?.request.model).toBe(MODEL)
   expect(MODEL).toBe('claude-haiku-5-5')
   expect(ask?.request.maxTokens).toBe(MAX_TOKENS)
-  expect(MAX_TOKENS).toBe(220)
+  expect(MAX_TOKENS).toBe(320)
   expect(ask?.request.timeoutMs).toBe(TIMEOUT_MS)
   expect(TIMEOUT_MS).toBe(15_000)
   expect(ask?.request.system).toEqual([{ text: AGENT_SYSTEM, cache: true }])

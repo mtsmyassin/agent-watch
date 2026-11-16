@@ -109,7 +109,7 @@ test("with the window open, an agent's first call brings one narrator call, and 
 
   expect(r.asked.length).toBe(1)
   expect(r.asked[0]?.model).toBe('claude-haiku-5-5')
-  expect(r.asked[0]?.maxTokens).toBe(220)
+  expect(r.asked[0]?.maxTokens).toBe(320)
   expect(r.asked[0]?.timeoutMs).toBe(15_000)
   expect(r.asked[0]?.prompt).toContain('find the auth flow')
   expect(r.asked[0]?.prompt).toContain('Read notes.txt -> Line 1: sign-in goes through session.py')

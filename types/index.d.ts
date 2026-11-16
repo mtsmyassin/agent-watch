@@ -107,7 +107,7 @@ export type Trail = {
 }
 
 /** A moment the narrator writes at. */
-export type Moment = 'start' | 'stage' | 'kind' | 'stuck' | 'recover' | 'finish'
+export type Moment = 'start' | 'stage' | 'kind' | 'stuck' | 'trouble' | 'recover' | 'finish'
 
 /** What the narrator wrote for one agent, cleaned and capped, and when it landed. */
 export type Told = {
@@ -121,11 +121,17 @@ export type Told = {
   how: string
   /** What it will most likely do next; once over, what is left for the person. */
   next?: string
+  /** How far along it is against its brief, in one line: an estimate, never a measurement. */
+  progress?: string
+  /** The same estimate as a whole number, 0 to 100. */
+  percent?: number
+  /** One thing the person can do about it, or that nothing is needed. */
+  advice?: string
   at: number
 }
 
 /** What the narrator last took note of for an agent: a change in it is a moment. */
-export type Seen = { stage: Stage; kind?: Kind; health: Health }
+export type Seen = { stage: Stage; kind?: Kind; health: Health; trouble?: Sign[] }
 
 /** One agent's narration: what was written, what was seen, what waits to be asked. */
 export type Story = {
@@ -141,6 +147,10 @@ export type Story = {
   failed?: string
   /** Set for an agent already over when first seen: it is never narrated. */
   isOwn?: true
+  /** The trouble signs (and `stuck`) the call out now was asked with, joined; absent for none. */
+  askedFor?: string
+  /** The same for the words told: their advice holds only while the signs are still these. */
+  toldFor?: string
 }
 
 /** The narrator's account for the session: its calls, its cost, and the team sentence. */
@@ -185,6 +195,10 @@ export type Card = {
    */
   mode: 'told' | 'writing' | 'plain' | 'own'
   why?: string
+  /** The trouble signs the rules found, each with its evidence and the rules' advice. */
+  trouble?: Trouble[]
+  /** The narrator's advice, only while it was written for the signs the agent shows now. */
+  advice?: string
 }
 
 /** Everything the cards need beyond the rows: written beside `agents` in the data file. */
