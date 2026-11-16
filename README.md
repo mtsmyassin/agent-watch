@@ -31,7 +31,26 @@ The pane opens by itself when the first agent starts, and closes by itself about
 
 ## The window
 
-`/agent-watch gui` opens the same agents in a window of their own: a timeline with a lane per agent and a bar for every tool call, so you can see where the time went.
+`/agent-watch gui` opens the same agents in a window of their own, with two tabs: **Cards** (the main view) and **Timeline**.
+
+### Cards
+
+One card per working agent, in plain words, so you can tell at a glance who is fine, who is stuck and what each one is doing:
+
+- A line at the top sums up the whole team, with counts (working, slow, stuck, finished) and a bar with one segment per agent. Click a segment to jump to its card.
+- Each card says what the agent is doing now, which of four stages it is at (looking, changing, checking, reporting), what it has found so far, and a health light: green while it takes steps, amber after a minute with no new step, red after two. A tool call still running counts as quiet, which is how a search that hangs shows up. The numbers (tools, tokens, time) are behind `Numbers`.
+- Hover a card, or focus it with the keyboard, for what it is fixing, how, and what comes next, with how long ago that was written. Click to keep it open; Esc closes it. Every symbol explains itself on hover.
+- A stuck agent jumps to the top under a red banner with a `Show me` button. A finished agent folds into one line under `Finished`.
+
+The words on the cards come from a small narrator: Claude Haiku (`claude-haiku-5-5`), called by the mod on the session's own account, so **it costs tokens** (on an API key, money; on a subscription, usage). The footer always shows what it has spent this session: calls made, tokens in and out. To keep that small it writes only at the moments that matter: when an agent starts, moves to a new stage, settles into a different kind of work, goes stuck, recovers, and finishes. Its budget is fixed: at most one call per agent every 20 seconds, two calls at a time, 80 calls a session (then the plain rules for the rest of the session, and the footer says so). Each call is capped at 220 tokens of reply and 15 seconds. It runs only while the window is open.
+
+What it is sent is masked first, the same way as everything else this mod shows: the agent's type and task, the brief it was given, its stage and its last eight tool calls with the opening of what each returned. What it writes back is checked before it is shown: it must be the expected small JSON, control characters are stripped, each field is held to 200 letters, and the page sets it as plain text.
+
+Whenever the narrator has nothing (not written yet, a call failed, its budget is spent, or it is switched off) the card shows the plain rules instead, the same wording the pane uses (`Reading notes.txt`, `Ran pytest -x`), and says `Plain rules: the narrator is offline`. A refusal that will not clear (sign-in, billing, an unknown model) or three failures in a row stop it for the session. Turn it off with the plugin option `Plain-words narrator in the agents window` (on by default): the cards then use the plain rules and no model is ever called. In a nested worker (`DELTAO_NESTED_CLI=1`) the whole mod is off unless `AGENT_WATCH=on`.
+
+### Timeline
+
+A lane per agent and a bar for every tool call, so you can see where the time went.
 
 - Each lane's faint band is how long the agent has been alive; the bars on it are its tool calls. A call in flight is outlined in emerald and grows with the clock, then settles on its true length when it ends. Calls that ran side by side are stacked.
 - Click a lane for its calls, newest first, with how long each took, its tool and token counts, and its answer once it finishes.
@@ -46,7 +65,7 @@ What ships in `gui/` and under which license (the Motion animation library and t
 
 ## What it touches
 
-It only watches. It never blocks, changes or delays a tool call: the bookkeeping runs after the event has gone on its way, at a measured cost of about 2 ms per subagent tool call.
+It only watches. It never blocks, changes or delays a tool call: the bookkeeping runs after the event has gone on its way, at a measured cost of about 2 ms per subagent tool call. The one thing it does on its own is the narrator's model calls described above, made only while the window is open and within that budget; they show in `/cost` like any other call.
 
 Text shown in the pane is masked first when it has the name or the shape of a credential (`TOKEN=...`, `curl -u user:pass`, `mysql -p ...`, bearer headers, cookies, private keys, long random strings). This is a best effort for a screen you may be sharing, not a guarantee: a password passed to a tool the mod does not know can still show.
 
@@ -62,4 +81,4 @@ claude plugin validate .
 claude plugin test .
 ```
 
-The tests are in `tests/agent-watch.test.tsx`. Built and tested on Claude Code 2.1.322; the mods API is early access, so a later version may need changes.
+The tests are in `tests/`: `agent-watch.test.tsx` for the pane and the window's data, `narrator.test.tsx` for the kind, stage and health rules, `narrator-logic.test.tsx` for when the narrator speaks and what it may say, and `narrator-wiring.test.tsx` for the narrator inside the mod. The rules themselves are pure functions in `hooks/infer.ts` and `hooks/narrator.ts`. Built and tested on Claude Code 2.1.322 and 2.1.325; the mods API is early access, so a later version may need changes.

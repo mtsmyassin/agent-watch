@@ -245,3 +245,35 @@ HTML/CSS/JS with the vendored Motion 14.12.0, Python + Playwright gui-sim harnes
     tabs and Float button.
 11. The narrator's short call results (140 letters each, masked) stay in the mod's state and are not written to
     the data file.
+12. A start still waiting to be told also stays when a newer moment comes (only an end or a waking outranks it),
+    besides the waiting end the plan named: its call covers whatever came since, and asks for "what".
+13. A call the engine will not send at all (`$.model.complete` rejects: a blocked model, a bad cap) stops the
+    narrator for the session, like a refusal that will not clear. The engine says it only rejects what it will
+    reject again.
+14. The prompt also carries the agent's state, how long it has run, its own answer once over, and the narrator's
+    last card (now / how), so one update reads on from the last. Every text in it is masked and cut again in
+    `agentPrompt`, whatever the caller did. The team call gets the same budget and caps as an agent call and
+    counts toward the 80.
+15. The narrator plans on every change and every tick while the window is fed, and the data file is written again
+    only when what the page shows moved (an ask went out, or a card or the account changed), so planning never
+    adds beats of its own.
+16. The 2.1.325 test kit does not move `Date.now()`, so the wiring tests reach the start (first call) but not the
+    20 s gap; the gap is covered by the pure tests.
+17. Logic tests live in `tests/narrator-logic.test.tsx` and wiring tests in `tests/narrator-wiring.test.tsx`
+    (the plan named one file; the first builder split them, and the split is kept). None of the 77 old tests was
+    changed.
+18. The Timeline tab keeps the old header numbers (running, done, tool calls, elapsed); on Cards they are hidden,
+    since the chips and the team line say the same in plain words.
+19. A card's name is the task the agent was given (as a heading), with its type beside it: the task says what it
+    is for, the type alone does not.
+20. "Writing an update" is a static note, not animated dots: one shared rhythm, no per-card spinners. The only
+    looping motion on a card is the health dot's breath, phased to one shared clock like the timeline's marks.
+21. The health tip states the limits the mod wrote (60 s / 120 s), not fixed words.
+22. The gui-sim `sim.py` clicks the Timeline tab before it plays, since Cards is now the default view.
+23. axe flagged empty `role="tooltip"` nodes (aria-tooltip-name), the timeline's bar tip among them (it was
+    already so on main). The bar tip and the new symbol tip only repeat what is on screen or in an aria-label, so
+    both are `aria-hidden`; the explanation popover carries the tooltip role only while it shows, and the card it
+    explains points at it with `aria-describedby`. Nothing looks different.
+24. The axe check runs on static snapshots of the drawn page (cards, cards with an explanation pinned, timeline)
+    served from 127.0.0.1: axe on the live page never settles, since the page re-reads its data four times a
+    second. The island (a Picture-in-Picture window) was not axe-checked.
