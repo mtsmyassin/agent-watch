@@ -7,13 +7,13 @@
     "autoOpenWindow": {
       "type": "boolean",
       "title": "Open the agents window by itself",
-      "description": "Opens the agents window in a browser the first time two or more agents are working in a session. Off, the window opens only when you type /agent-watch gui.",
-      "default": false
+      "description": "Opens the agents window by itself the first time two or more agents are working in a session, without taking the keyboard from the window you are typing in. Off, the window opens only when you type /agent-watch gui.",
+      "default": true
     },
     "narrator": {
       "type": "boolean",
       "title": "Plain-words narrator in the agents window",
-      "description": "While the agents window is open, a small model (Haiku) writes each agent's card in plain words at the moments that matter: at most one call per agent per 20 s and 80 calls a session, its cost shown at the foot of the window. Off, the cards use plain rules and no model is called.",
+      "description": "While the agents window is open, a small model (Haiku) writes each agent's card in plain words: what it is doing, how far along it is (an estimate), and what you can do about trouble. It runs only on a plan that does not pay per call (your Max plan), at most one call per agent per 20 s and 400 calls a session; its use is shown at the foot of the window. Off, the cards use plain rules and no model is called.",
       "default": true
     }
   }

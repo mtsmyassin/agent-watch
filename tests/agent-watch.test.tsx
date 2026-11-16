@@ -2035,7 +2035,7 @@ test('with no screen the page is laid for whoever opens it, and no window is ope
   expect(d.ran).toEqual([])
 })
 
-test('while the window is off nothing is written, and /agent-watch is as it was', async ($, on) => {
+test('while the window is off nothing is written, and /agent-watch is as it was', { options: { autoOpenWindow: false } }, async ($, on) => {
   const w = world(on, WINDOWS)
   const d = desk(on)
   const clock = mock.clock(on)
@@ -2171,7 +2171,9 @@ test(
     await clock.settle()
 
     expect(d.ran.length).toBe(1)
-    expect(d.ran[0]?.slice(0, 5)).toEqual(['cmd', '/c', 'start', '', 'msedge'])
+    // Opened by itself, through the opener that hands the keyboard back.
+    expect(d.ran[0]?.[0]).toBe('powershell')
+    expect(d.ran[0]?.some(arg => arg.endsWith('/gui/open-window.ps1'))).toBe(true)
     expect(dataOf(d).agents.map(one => one.task)).toEqual([
       'find the auth flow',
       'write tests',

@@ -73,6 +73,8 @@ const SID_TOKEN = '__AW_SID__'
 const ASSETS = ['fonts.css', 'motion.js'] as const
 /** The window the page opens in, as Edge's app mode takes it. */
 const WINDOW_SIZE = '1280,840'
+/** How the page's title starts: how the quiet opener finds its window. */
+const WINDOW_TITLE = 'Agents'
 
 // The DeltaO.ai palette (DESIGN.md): a near-void canvas and warm off-white
 // text in three strengths. Order is weight and brightness; the one accent,
@@ -181,7 +183,7 @@ let isGuiOn = false
 let sid = ''
 /** The folder the window's files go under, once asked for. */
 let home: string | undefined
-/** True where the options ask for the window as soon as two agents are at work. */
+/** True unless the options say no: the window opens as soon as two agents are at work. */
 let isAutoOpen = false
 /** True once this copy opened the window by itself: it does that once. */
 let hasAutoOpened = false
@@ -801,15 +803,40 @@ type Launch = { isLaunched: boolean; problem?: string }
  * Opens the page in a window of its own: Edge's app mode on Windows, the
  * desktop's own opener elsewhere, as far as that goes. A session with no
  * screen and `AGENT_WATCH_BROWSER=none` open nothing.
+ *
+ * `isQuiet` (the window opening by itself) goes through the mod's
+ * `gui/open-window.ps1` on Windows: it opens the same window, hands the
+ * keyboard back to whatever window had it, and lifts the new one into sight.
+ * Should that fail, the window opens the plain way.
  */
-async function launch($: EngineInterface, url: string): Promise<Launch> {
+async function launch($: EngineInterface, url: string, isQuiet: boolean): Promise<Launch> {
   if (!hasScreen || (await $.env.get('AGENT_WATCH_BROWSER')) === 'none') {
     return { isLaunched: false }
   }
 
   const isWindows = (await $.env.get('OS')) === 'Windows_NT'
+  const plain = ['cmd', '/c', 'start', '', 'msedge', `--app=${url}`, `--window-size=${WINDOW_SIZE}`]
+  const quiet = [
+    'powershell',
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-WindowStyle',
+    'Hidden',
+    '-File',
+    `${$.plugin.root}/gui/open-window.ps1`,
+    '-Url',
+    url,
+    '-Size',
+    WINDOW_SIZE,
+    '-Title',
+    WINDOW_TITLE,
+  ]
   const openers: readonly (readonly string[])[] = isWindows
-    ? [['cmd', '/c', 'start', '', 'msedge', `--app=${url}`, `--window-size=${WINDOW_SIZE}`]]
+    ? isQuiet
+      ? [quiet, plain]
+      : [plain]
     : [
         ['xdg-open', url],
         ['open', url],
@@ -895,7 +922,7 @@ async function writeFirst($: EngineInterface): Promise<boolean> {
  *
  * Never awaited from a job of the queue: its first write waits its turn there.
  */
-async function openWindow($: EngineInterface): Promise<Opened> {
+async function openWindow($: EngineInterface, isQuiet = false): Promise<Opened> {
   const under = await homeOf($)
 
   if (under === undefined) {
@@ -931,7 +958,7 @@ async function openWindow($: EngineInterface): Promise<Opened> {
     problems.push('its data file could not be written')
   }
 
-  const { isLaunched, problem } = await launch($, pageUrl(page))
+  const { isLaunched, problem } = await launch($, pageUrl(page), isQuiet)
 
   if (problem !== undefined) {
     problems.push(problem)
@@ -963,7 +990,8 @@ function autoOpen($: EngineInterface, rows: readonly AgentRow[]): void {
   }
 
   hasAutoOpened = true
-  openWindow($)
+  // Nobody asked for it at this moment: it must not take the keyboard.
+  openWindow($, true)
     .then(opened => {
       // Nobody asked, so nobody reads an answer: what failed is said in a toast.
       const [problem] = opened.problems
@@ -984,7 +1012,8 @@ function changed($: EngineInterface, rows: readonly AgentRow[]): void {
 }
 
 export const register: Register = (on, options) => {
-  isAutoOpen = options.autoOpenWindow === true
+  // On unless the options switch it off (the owner's call, 2026-11-16).
+  isAutoOpen = options.autoOpenWindow !== false
   isNarratorOn = options.narrator !== false
 
   on('session.start', async ($, e, next) => {
