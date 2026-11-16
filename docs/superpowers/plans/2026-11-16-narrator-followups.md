@@ -210,3 +210,58 @@ the repo).
 ## Calls made
 
 (Kept up to date while building; each is the conservative reading of an open point in the design.)
+
+1. **"Skip the 20 s wait once"** = an agent may not skip twice in a row: a call that went out inside the gap marks the
+   story `rushed`, and the next call that waited the gap out gives the skip back. So at most two calls per agent in any
+   20 s, and the 2-in-flight limit and urgent-first order are untouched.
+2. **Refresh** goes for a live agent that is not resting (`idle`) and shows a trouble sign or is stuck, 30 s after the
+   last call for it went out, when nothing else waits for it. It is neither urgent nor team news, and a moment already
+   waiting is asked as itself. A stuck agent is refreshed too (the design names it), though its trail does not move: a
+   hung agent costs about 2 calls a minute of the 400, which still stops the narrator for the session if reached.
+3. The refresh cannot be driven through the mod in the test kit: `Date.now` is read-only there and the kit's clock does
+   not move it. It is tested on `planned()` and seen in live run A. The urgent skip is tested both ways.
+4. **The trouble evidence's count** is every time the agent did that step in its kept trail (every failure of it, for
+   failing), not the count inside the 12-call (8-call) window that found it: on a long loop the card read "12 times"
+   while the agent was at 22. Finding a sign and clearing it are unchanged.
+5. **The tally** lists per file how many times it was read and changed, per search how many times it ran, and per step
+   how many times it failed (the newest 12 of each, `once` / `N times`). Searches and failed steps are named by their
+   masked words. The `Tally of its N steps` line and `Counts come from the tally of the whole trail` are kept word for
+   word, so the old tests of them hold.
+6. **The count check reads only plain counts**: "read config.txt 6 times", "5 reads of notes.md", "2 edits to auth.py",
+   "failed 3 times", "searched 4 times", number words, once/twice. A count naming a file must equal that file's count;
+   one naming none must equal the kind's total or any one file's or step's count (lenient: a false correction is worse
+   than a miss). Left alone: the brief's numbers ("asked to read it 8 times", "6 of the 8 asked" checks only the 6),
+   limits ("up to 5"), differences ("3 more", "4 left"), parts ("3 reads in src", "2 reads failed"), "N failures" and
+   "N failed tests" (as likely the project's own test results), "changes" (one edit may make many), decimals, and
+   "once" as a conjunction. Missed on purpose: "searched for the word read 3 times" reads as a read.
+7. **The rules' words** that replace a miscounted field: for `progress`, the tally in words ("Counted from its steps: 5
+   reads, 1 edit; 0 failed.") with the estimate (`percent`) dropped, so no bar shows a number from a reply that
+   miscounted; for `found`, the rules' own found (the last finished step) as it stood when the call went out. Each
+   agent call carries the tally its prompt gave, so the check judges the reply against what the narrator saw, not
+   against steps taken while it wrote. Corrections are counted in `cards.narrator.corrected` (the page does not show it
+   yet) and each is a debug-log line naming the field, what it said and what the tally has.
+8. **Shell writes** live in a new pure file, `hooks/shell.ts`; `notesOf` runs it for `Bash` and `PowerShell` whatever
+   their kind (`run` or `test`). Of several targets the touch is the one both outside and secret, else outside, else
+   secret. A command that failed or was refused is not counted, as with the edit tools (it may have written before it
+   failed: a miss, not a false alarm). Writes to temp folders count as outside, as they do for the edit tools.
+9. **What the shell reader trusts**: quotes (single literal, double with `$`/backtick making the rest unsure), escapes
+   (a path written with one is unsure; a line continuation joins), comments (`#`, PowerShell `<# #>`), heredoc bodies
+   (not read: the reader stops at the next line), `2>&1`/`>&2` (no file), `/dev/null`, `/dev/fd/N`, `$null`, `NUL`
+   (no file). PowerShell parameters bind by unique prefix, `-Name:value` too; positionals bind only while every option
+   before them is known (an unknown one may take a value). `cp`/`mv` read GNU option clusters (`-rt dir`, `-t/tmp`),
+   `--target-directory`, `--`, and a folder destination (trailing slash, `.`, `..`, or several sources) takes each
+   source's name. A relative target after a `cd` in the same command, or one that climbs with `..`, keeps its name
+   only: the shell tools keep their folder between calls, so `..` cannot be placed. `bash -c "..."` and other nested
+   shells are not read. Commands are read up to 20 000 letters.
+10. **Shell wording** for a secret name: "Wrote a file that may hold secrets with a command: <file>"; both: "Wrote a
+    file that may hold secrets, outside this project, with a command: <file>". Advice follows the edit tools' pattern.
+11. **gui-sim**: the page is unchanged on this branch. The `ten` scenario's outside sign was switched to the shell
+    wording (harness only, backup `cards.py.bak-followups`) so the longer evidence line is drawn and filmed.
+12. **axe**: with the WCAG 2.0/2.1 A and AA tags, 0 violations on cards, pinned and timeline. A run with the tool's
+    default rule set also lists two best-practice rules (`region`, `heading-order`) on the unchanged page; they are not
+    WCAG failures and predate this branch.
+13. **Live run A** ran with `AGENT_WATCH_BROWSER=none`: the mod lays and feeds the page as usual, a hidden browser films
+    it, and no Edge window opens on the owner's desktop.
+14. **An independent review** of the two parsers (before run A) found false-alarm inputs; all that could raise a wrong
+    flag or a wrong correction were fixed with tests (commit "Close the review's false alarms"). Left as misses: a `<<`
+    inside `$(( ))` stops the reader at that line's end; bash `>&file` is read as a stream copy.
