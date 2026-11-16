@@ -1,7 +1,7 @@
 // An agent's trail, with no engine in it: the tool calls it made, the longer
 // result it ended with, and the data file a page reads them from. Every
 // function here is pure.
-import type { AgentRow, Call, Kind, Payload, Trail } from '../types'
+import type { AgentRow, Call, Kind, Payload, Touch, Trail } from '../types'
 import { arranged, lastFolder, settled, typeName } from './roster'
 
 /** The calls kept for one agent; past it the oldest go, and are counted. */
@@ -23,15 +23,31 @@ const trailOf = (trails: Trails, agentId: string): Trail | undefined =>
 
 // --- Events folded into trails ---------------------------------------------
 
+/** What the mod notes about a call as it starts, for the trouble rules and the narrator. */
+export type Notes = { step?: string; touch?: Touch; name?: string }
+
 /**
  * A call as it starts: said as it runs, and as it will read once over, with
- * the kind of work it is when it is any (bookkeeping is none).
+ * the kind of work it is when it is any (bookkeeping is none), and the notes
+ * the trouble rules read.
  */
-export function called(key: string, doing: string, at: number, kind?: Kind): Call {
+export function called(key: string, doing: string, at: number, kind?: Kind, notes: Notes = {}): Call {
   const call: Call = { key, doing, did: settled(doing), at }
 
   if (kind !== undefined) {
     call.kind = kind
+  }
+
+  if (notes.step !== undefined) {
+    call.step = notes.step
+  }
+
+  if (notes.touch !== undefined) {
+    call.touch = notes.touch
+  }
+
+  if (notes.name !== undefined) {
+    call.name = notes.name
   }
 
   return call
@@ -187,8 +203,9 @@ function shown(
     tools: row.tools,
     tokens: row.tokens,
     dropped: trail?.dropped ?? 0,
-    // What each call answered is the narrator's to read, never the page's.
-    calls: (trail?.calls ?? []).map(({ out: _out, ...call }) => call),
+    // What each call answered and what the mod noted about it are the
+    // narrator's and the rules' to read, never the page's.
+    calls: (trail?.calls ?? []).map(({ out: _out, step: _step, touch: _touch, name: _name, ...call }) => call),
   }
 
   if (row.endedAt !== undefined) {

@@ -71,7 +71,28 @@ export type Call = {
    * never written to the page's data.
    */
   out?: string
+  /**
+   * The step it is, as a short hash of the tool and its arguments: the same
+   * step again is the same hash. Kept in the mod, never written to the page.
+   */
+  step?: string
+  /** A change it made that needs checking: outside the project, or to a file that may hold secrets. */
+  touch?: Touch
+  /** The name of the file it read or changed, never its folders; masked. For the narrator alone. */
+  name?: string
 }
+
+/** A trouble sign the rules find in an agent's calls. */
+export type Sign = 'circles' | 'failing' | 'outside'
+
+/**
+ * A change to a file that needs checking: its name (never its folders), and
+ * why. The full path is judged inside the mod and kept nowhere.
+ */
+export type Touch = { file: string; outside?: true; secret?: true }
+
+/** A trouble sign as the card shows it: what the rules saw, and what the person can do. */
+export type Trouble = { sign: Sign; evidence: string; advice: string }
 
 /** What one agent did, call by call, and the longer result it ended with. */
 export type Trail = {
