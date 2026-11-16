@@ -58,6 +58,9 @@ test('counts of reads, searches, edits and failures are found', () => {
   expect(said('3 of 8 reads done')).toEqual(['read:3'])
   expect(said('Changed auth.py once')).toEqual(['edit:1@auth.py'])
   expect(said('Read CONFIG.TXT 3 times.')).toEqual(['read:3@config.txt'])
+  // Seen live: the file named between the number and the noun.
+  expect(said('It has done 16 config.txt reads and has not reported yet')).toEqual(['read:16@config.txt'])
+  expect(said('2 auth.py edits so far')).toEqual(['edit:2@auth.py'])
 })
 
 test('numbers from the brief and differences are not counts', () => {
@@ -137,12 +140,26 @@ test("a reply that contradicts the tally has that field replaced by the rules' w
 
   expect(told?.progress).toBe(rulesProgress(tallyOf(trail)))
   expect(told?.percent).toBeUndefined()
-  // The rules' found: the last finished step.
-  expect(told?.found).toBe('Ran pytest -x')
+  // Only the finding that miscounts goes; the others stay.
+  expect(told?.found).toBe('debug is on in config.txt')
   expect(told?.now).toBe('Reading config.txt')
   expect(wrong.ledger.miscounts).toBe(2)
   expect(wrong.stories.a1?.corrected).toContain('progress said "read config.txt 6 times"')
   expect(wrong.stories.a1?.corrected).toContain('the tally has 3')
+
+  // With every finding wrong, the rules' found stands in: the last finished step.
+  const allWrong = landed(plan.narration, ask, answer({ ...story, found: 'read notes.md 9 times' }), T + 3000)
+
+  expect(allWrong.stories.a1?.told?.found).toBe('Ran pytest -x')
+
+  // Seen live: once over, the stand-in is still the last step, never the agent's own answer,
+  // which may hold the very count that was wrong ("I ran 20 sequential reads" at 24).
+  const over = { ...row, state: 'completed' as const, endedAt: T + 1500 }
+  const finished = { a1: { ...trail, result: 'Task complete. I ran 20 sequential reads of config.txt.' } }
+  const late = planned({ ...plan.narration, stories: { a1: { seen: { stage: 'checking', health: 'working' } } } }, [over], finished, T + 2000)
+  const lateAsk = late.asks.find(one => one.to === 'agent') as Ask
+
+  expect(lateAsk.to === 'agent' && lateAsk.found).toBe('Ran pytest -x')
 
   // A reply whose counts match is kept as it is.
   const right = landed(

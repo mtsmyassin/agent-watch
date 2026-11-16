@@ -24,7 +24,7 @@ import { healthOf, kindNow, plainOf, SLOW_MS, stageOf, steadyKind, STUCK_MS } fr
 import { brief, clip, isLive, redact, span, typeName, unpathed } from './roster'
 import type { Trails } from './trail'
 import type { Access } from './billing'
-import { corrected, KIND_COUNTS, tallyOf, times } from './counts'
+import { corrected, KIND_COUNTS, lastStep, tallyOf, times } from './counts'
 import type { Tally } from './counts'
 import { troubleOf } from './trouble'
 
@@ -393,7 +393,7 @@ export function planned(
         moment,
         request: requestOf(AGENT_SYSTEM, agentPrompt(next, trail, story, moment, now)),
         tally: tallyOf(trail),
-        found: plainOf(next, trail, now).found,
+        found: lastStep(trail),
       })
     }
 

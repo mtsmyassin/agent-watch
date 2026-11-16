@@ -325,6 +325,25 @@ export function claimsIn(text: string, files: readonly string[]): Claim[] {
     claims.push(claim)
   }
 
+  // "16 config.txt reads": the file named between the number and the noun.
+  for (const name of files) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const between = new RegExp(`(?<![\\d.,])\\b(${NUM})\\s+${escaped}\\s+(reads?|edits?)\\b`, 'gi')
+
+    for (const match of head.matchAll(between)) {
+      const at = match.index ?? 0
+      const end = at + match[0].length
+
+      if (ASKED_COUNT_BEFORE.test(head.slice(Math.max(0, at - 20), at)) || NOT_DONE_AFTER.test(head.slice(end, end + 30))) {
+        continue
+      }
+
+      const noun = (match[2] as string).toLowerCase()
+
+      claims.push({ kind: noun.startsWith('read') ? 'read' : 'edit', count: numberOf(match[1] as string), file: name, said: match[0], at })
+    }
+  }
+
   return claims
     .sort((a, b) => a.at - b.at)
     .map(({ at: _at, ...claim }) => claim)
@@ -351,6 +370,17 @@ function truthOf(claim: Claim, tally: Tally): number[] {
   return [...new Set([total, ...list.map(one => one.count)])]
 }
 
+/** The longest a stand-in finding may read: the explanation's field cap. */
+const FOUND_MAX = 320
+
+/** The rules' "found" for a correction: the agent's last finished step, never its own answer. */
+export function lastStep(trail: Trail | undefined): string {
+  const done = (trail?.calls ?? []).filter(call => call.end !== undefined)
+  const last = done[done.length - 1]
+
+  return last === undefined ? '' : brief(unpathed(last.did), FOUND_MAX)
+}
+
 /** The fields of a reply whose counts are checked. */
 type Counted = { progress?: string; percent?: number; found?: string }
 
@@ -374,16 +404,24 @@ export function corrected<T extends Counted>(told: T, tally: Tally, found: strin
     wrong.push(said('progress', progress))
   }
 
-  const finding = told.found === undefined ? undefined : miscounted(told.found, tally)
+  // Found holds up to three findings: only those that miscount go, and with none left the last step stands in.
+  if (told.found !== undefined) {
+    const findings = told.found.split(';').map(one => one.trim()).filter(one => one !== '')
+    const misses = findings.map(one => miscounted(one, tally))
+    const kept = findings.filter((_, index) => misses[index] === undefined)
+    const first = misses.find(miss => miss !== undefined)
 
-  if (finding !== undefined) {
-    if (found === '') {
-      delete fixed.found
-    } else {
-      fixed.found = found
+    if (first !== undefined) {
+      wrong.push(said('found', first))
+
+      if (kept.length > 0) {
+        fixed.found = kept.join('; ')
+      } else if (found === '') {
+        delete fixed.found
+      } else {
+        fixed.found = found.slice(0, FOUND_MAX)
+      }
     }
-
-    wrong.push(said('found', finding))
   }
 
   return { told: fixed, wrong }
