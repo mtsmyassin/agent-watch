@@ -545,7 +545,7 @@ function tallyLines(trail: Trail | undefined): string[] {
   const failed = kinded.filter(call => call.isFailed === true).length
   const dropped = trail?.dropped ?? 0
   const lines = [
-    `Tally of its ${kinded.length} steps: ${parts.join(', ')}. ${failed} failed.${dropped > 0 ? ` (${dropped} older steps were let go and are not counted.)` : ''}`,
+    `Tally of its ${kinded.length} step${kinded.length === 1 ? '' : 's'}: ${parts.join(', ')}. ${failed} failed.${dropped > 0 ? ` (${dropped} older steps were let go and are not counted.)` : ''}`,
   ]
 
   for (const [kind, label] of [

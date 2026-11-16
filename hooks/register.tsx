@@ -3,7 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentRow } from '../types'
 import { kindOf, outOf } from './infer'
-import { cardsOf, EMPTY, isBusy as isNarrating, landed, planned, restarted } from './narrator'
+import { BRIEF_MAX, cardsOf, EMPTY, isBusy as isNarrating, landed, planned, restarted } from './narrator'
 import type { Ask, Reply } from './narrator'
 import {
   acted,
@@ -41,6 +41,7 @@ import {
   resulted,
 } from './trail'
 import type { Trails } from './trail'
+import { notesOf } from './trouble'
 
 const NAME = 'agent-watch'
 const PANE = 'agent-watch'
@@ -129,8 +130,6 @@ const NO_COST = {
   cache_read_input_tokens: 0,
   cache_creation_input_tokens: 0,
 } as const
-/** How much of an agent's brief the narrator may read, masked. */
-const ASK_MAX = 400
 
 const clock = (): number => Date.now()
 
@@ -1059,7 +1058,7 @@ export const register: Register = (on, options) => {
       const row = born(id, clock(), known)
       const isResume = e.resume !== undefined
       // Masked and cut here: only that ever reaches the narrator.
-      const ask = isNarratorOn ? brief(e.prompt ?? '', ASK_MAX) : ''
+      const ask = isNarratorOn ? brief(e.prompt ?? '', BRIEF_MAX) : ''
 
       grace = GRACE
       enqueue($, 'spawn', () => admit($, row, isResume, ask))
@@ -1097,7 +1096,9 @@ export const register: Register = (on, options) => {
     const activity = describeCall(e.tool, input)
     const isCounted = !isBookkeeping(e.tool)
     const startedAt = clock()
-    const call = called(keyOf(input, startedAt), activity, startedAt, kindOf(e.tool, input))
+    const kind = kindOf(e.tool, input)
+    // The step it is and any risky change, judged here: the full path stays in this hook.
+    const call = called(keyOf(input, startedAt), activity, startedAt, kind, notesOf(e.tool, input, kind, cwd))
     // Failed, until the call comes back with an answer that is no error and no refusal.
     let isFailed = true
     // The opening of what it answered, masked: for the narrator alone.
