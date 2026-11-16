@@ -216,7 +216,11 @@ export function plainOf(
   return { now: doing(row, now), found: done[done.length - 1]?.did ?? '' }
 }
 
-/** A call's result as the narrator may read it: its opening, folder paths cut, credentials masked. */
+/**
+ * A call's result as the narrator may read it: its opening, folder paths cut,
+ * credentials masked, its line breaks kept as ` | ` so lines (a search's
+ * matches, a file's lines) are not run together into one.
+ */
 export function outOf(text: string): string {
-  return brief(unpathed(text.slice(0, 600)), OUT_MAX)
+  return brief(unpathed(text.slice(0, 600).trim()).replace(/\s*[\r\n]+\s*/g, ' | '), OUT_MAX)
 }

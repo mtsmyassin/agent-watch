@@ -429,6 +429,7 @@ export const AGENT_SYSTEM = [
   'Grounding: say only what the steps and what they returned show. Name the files and functions it read or',
   'changed, by name. Never guess: when the steps do not show something, write "Not clear yet" for that field.',
   'Do not invent findings, causes or plans the steps do not show.',
+  'Counts come from the tally of the whole trail; the list of steps shows only the newest 8.',
   'If the agent is slow or stuck, say so plainly, and what it was waiting on.',
   'If the rules found trouble (going in circles, failing the same way, touching what it should not),',
   'say so plainly in "how" and base "advice" on the evidence given.',

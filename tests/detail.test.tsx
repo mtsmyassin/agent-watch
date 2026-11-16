@@ -2,6 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { AGENT_SYSTEM, cardsOf, EMPTY, landed, MAX_TOKENS, parsed, planned, TEAM_SYSTEM } from '../hooks/narrator'
 import type { Ask, Reply } from '../hooks/narrator'
+import { outOf } from '../hooks/infer'
 import { born } from '../hooks/roster'
 import type { Call } from '../types'
 
@@ -86,4 +87,17 @@ test('a reply cut at the cap is counted', () => {
   const capped: Reply = { isAnswered: false, reason: 'api-error', error: 'max_output_tokens', status: 400, usage: usage(0) }
 
   expect(landed(plan.narration, plan.asks[0] as Ask, capped, T + 2000).ledger.cut).toBe(1)
+})
+
+test("a result's line breaks stay visible to the narrator, so lines are not run together", () => {
+  // Seen live: Grep's `fruit.txt:1:mango` and the next match ran together as "mango notes".
+  const out = outOf('fruit.txt:1:mango\nnotes.txt:1:Order mango pulp\r\n\r\nmenu.txt:4:mango smoothie 5.25')
+
+  expect(out).toBe('fruit.txt:1:mango | notes.txt:1:Order mango pulp | menu.txt:4:mango smoothie 5.25')
+  expect(outOf('one line, as before')).toBe('one line, as before')
+})
+
+test('the narrator is told to count from the tally, not from the newest steps it is shown', () => {
+  // Seen live: "Eight steps are done so far" when ten were, from the eight steps listed.
+  expect(AGENT_SYSTEM).toContain('Counts come from the tally of the whole trail')
 })
