@@ -78,6 +78,19 @@ test('numbers from the brief and differences are not counts', () => {
     'Once it has read config.txt it will report',
     'It read config.txt, and once it finishes it reports',
     'It read config.txt once more',
+    // From the review: the project's own numbers, parts of a whole, limits and the like.
+    '2 failed tests in the suite',
+    'found 4 failures in the logs',
+    '3 reads in src',
+    '2 reads failed',
+    'made 5 changes across 2 files',
+    'allowed up to 5 searches',
+    'told to do 5 searches',
+    "I'll edit config.txt once I have approval",
+    'asked to go and read it 8 times',
+    'the brief requires reading it 8 times',
+    '1.5 reads',
+    'twice as many reads as needed',
   ]) {
     expect(said(text)).toEqual([])
   }

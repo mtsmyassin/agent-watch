@@ -94,6 +94,8 @@ function lexed(command: string, isPowerShell: boolean): Item[] | undefined {
       at = close + 1
     } else if (char === '"') {
       let index = at + 1
+      // Past a `$` or a backtick, nothing in these quotes is literal: `"$(cat x)"` names no file.
+      let isExpanded = false
 
       word ??= { kind: 'word', text: '', unsureAt: -1 }
 
@@ -104,7 +106,8 @@ function lexed(command: string, isPowerShell: boolean): Item[] | undefined {
           letter(text.charAt(index + 1), false)
           index += 2
         } else {
-          letter(inside, inside !== '$' && inside !== '`')
+          isExpanded ||= inside === '$' || inside === '`'
+          letter(inside, !isExpanded)
           index += 1
         }
       }
@@ -115,9 +118,26 @@ function lexed(command: string, isPowerShell: boolean): Item[] | undefined {
 
       at = index + 1
     } else if ((char === '\\' && !isPowerShell) || (char === '`' && isPowerShell)) {
-      // An escape: the next letter stands for itself, but a path written so is not sure.
-      letter(next, false)
-      at += 2
+      if (next === '\n' || (next === '\r' && text.charAt(at + 2) === '\n')) {
+        // A line continued onto the next: one command, and nothing in between.
+        at += next === '\n' ? 2 : 3
+      } else {
+        // An escape: the next letter stands for itself, but a path written so is not sure.
+        letter(next, false)
+        at += 2
+      }
+    } else if (char === '<' && next === '#' && isPowerShell) {
+      // A block comment: read past its end, or stop where none comes.
+      const close = text.indexOf('#>', at + 2)
+
+      if (close === -1) {
+        end()
+
+        return items
+      }
+
+      end()
+      at = close + 2
     } else if (char === ';' || char === '(' || char === ')') {
       op(char)
       at += 1
@@ -187,6 +207,19 @@ function lexed(command: string, isPowerShell: boolean): Item[] | undefined {
 /** True for a path that names its root: `/x`, `\x`, `C:\x`, `\\server`. */
 const isRooted = (path: string): boolean => /^(?:[A-Za-z]:)?[\\/]/.test(path)
 
+/** A stream's own file, not a file on disk. */
+const STREAM_FILE = /^\/(?:dev\/fd|proc\/self\/fd)\/\d+$/
+
+/** True for a relative path that climbs: the shell may sit in another folder by now, so it cannot be placed. */
+const isClimbing = (path: string): boolean => !isRooted(path) && path.split(/[\\/]+/).includes('..')
+
+/** The tail of a word from `cut` on, still knowing which of its letters were not literal. */
+const tailOf = (word: Word, cut: number): Word => ({
+  kind: 'word',
+  text: word.text.slice(cut),
+  unsureAt: word.unsureAt < cut ? -1 : word.unsureAt - cut,
+})
+
 /** True for a word that names a folder, so a file copied there keeps its own name. */
 const isFolderLike = (path: string): boolean => /[\\/]$/.test(path) || ['.', '..'].includes(lastFolder(path))
 
@@ -199,11 +232,21 @@ function targetOf(word: Word, isAfterCd: boolean): Target | undefined {
   const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   const name = path.slice(cut + 1)
 
-  if (path === '' || SINKS.has(path.toLowerCase()) || name === '' || name === '.' || name === '..' || word.unsureAt > cut) {
+  if (
+    path === '' ||
+    SINKS.has(path.toLowerCase()) ||
+    STREAM_FILE.test(path) ||
+    name === '' ||
+    name === '.' ||
+    name === '..' ||
+    word.unsureAt > cut
+  ) {
     return undefined
   }
 
-  return { path, name, isFolderKnown: word.unsureAt === -1 && !(isAfterCd && !isRooted(path)) }
+  const isPlaced = word.unsureAt === -1 && !(isAfterCd && !isRooted(path)) && !isClimbing(path)
+
+  return { path, name, isFolderKnown: isPlaced }
 }
 
 /** Where a source lands in a folder: the folder joined with the source's own name. */
@@ -231,16 +274,26 @@ function copied(args: readonly Word[], isPowerShell: boolean): Word[] {
 
     if (!isDone && arg.text === '--') {
       isDone = true
-    } else if (!isDone && /^-./.test(arg.text)) {
-      if (arg.text === '-t' || arg.text === '--target-directory') {
-        folder = args[index + 1]
+    } else if (!isDone && /^--./.test(arg.text)) {
+      if (arg.text === '--target-directory') {
+        folder = args[(index += 1)]
+      } else if (arg.text === '--suffix') {
         index += 1
       } else if (arg.text.startsWith('--target-directory=')) {
-        const cut = '--target-directory='.length
+        folder = tailOf(arg, '--target-directory='.length)
+      }
+    } else if (!isDone && /^-./.test(arg.text)) {
+      // Short options cluster as getopt reads them: `-rt dir`, `-t/tmp`. One that takes a
+      // value (`t`, `S`) takes the rest of the cluster, or else the next word.
+      const letters = arg.text.slice(1)
+      const taker = letters.search(/[tS]/)
 
-        folder = { kind: 'word', text: arg.text.slice(cut), unsureAt: arg.unsureAt - cut }
-      } else if (arg.text === '-S' || arg.text === '--suffix') {
-        index += 1
+      if (taker !== -1) {
+        const value = taker + 2 < arg.text.length ? tailOf(arg, taker + 2) : args[(index += 1)]
+
+        if (letters.charAt(taker) === 't') {
+          folder = value
+        }
       }
     } else {
       operands.push(arg)
@@ -353,10 +406,7 @@ function cmdletWrites(name: string, args: readonly Word[]): Word[] {
       isMappable = false
     } else if (cmdlet.valued.includes(param)) {
       const glued = flag[2]
-      const value: Word | undefined =
-        glued === undefined
-          ? args[(index += 1)]
-          : { kind: 'word', text: glued, unsureAt: arg.unsureAt - (arg.text.length - glued.length) }
+      const value: Word | undefined = glued === undefined ? args[(index += 1)] : tailOf(arg, arg.text.length - glued.length)
 
       if (value !== undefined) {
         named[param] = value

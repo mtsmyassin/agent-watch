@@ -132,22 +132,27 @@ const NUM = `(?:\\d{1,4}|${NUMBER_WORDS.join('|')})`
 const OF_M = `(?:\\s+(?:of|out\\s+of)\\s+(?:the\\s+)?${NUM})`
 
 /** `12 times`, `6 of the 8 times`; then what follows, to spot "more" and "asked". */
-const TIMES = new RegExp(`\\b(${NUM})(${OF_M})?\\s+times\\b`, 'gi')
+const TIMES = new RegExp(`(?<![\\d.,])\\b(${NUM})(${OF_M})?\\s+times\\b`, 'gi')
 const ONCE = /\b(once|twice|thrice)\b/gi
 /** After "once": a conjunction or "once more", not a count. */
-const ONCE_NOT_COUNT = /^\s+(?:it|they|he|she|the|that|this|all|done|finished|complete|ready|more|again|[a-z]+ed)\b/i
+const ONCE_NOT_COUNT =
+  /^\s+(?:i|we|you|it|its|they|he|she|there|the|a|an|my|our|that|this|these|both|each|every|everything|all|done|finished|complete|ready|more|again|as|[a-z]+ed)\b/i
 /** `5 reads`, `3 of 8 reads`, `2 failed tests`. */
-const NOUNED = new RegExp(`\\b(${NUM})(${OF_M})?\\s+(failed\\s+)?([a-z-]+)\\b`, 'gi')
+const NOUNED = new RegExp(`(?<![\\d.,])\\b(${NUM})(${OF_M})?\\s+(failed\\s+)?([a-z-]+)\\b`, 'gi')
 
-/** The nouns a count may be of, by what they count. */
+/**
+ * The nouns a count may be of, by what they count. Failures are counted
+ * only as "failed N times": "2 failed tests" and "4 failures" are as likely
+ * the project's own test results as the agent's steps. "Changes" are left
+ * out too: one edit may make many.
+ */
 const NOUNS: Readonly<Record<string, ClaimKind>> = {
   read: 'read', reads: 'read', reread: 'read', rereads: 'read',
   search: 'search', searches: 'search',
-  edit: 'edit', edits: 'edit', change: 'edit', changes: 'edit',
-  failure: 'failure', failures: 'failure',
+  edit: 'edit', edits: 'edit',
 }
-/** After "failed", what is counted is failures. */
-const FAILED_NOUNS = new Set(['steps', 'step', 'calls', 'attempts', 'tries', 'reads', 'searches', 'edits', 'tests', 'runs', 'checks'])
+/** After a count with no file named, a word that makes it a part of the whole: "3 reads in src", "2 reads failed". */
+const PART_AFTER = /^\s+(?:in(?!\s+(?:all|total)\b)|across|under|from|over|on|of|to|into|inside|within|failed|that|which|with|per)\b/i
 
 /** The verbs a "N times" count is of; the nearest one before the number says which. */
 const VERBS: readonly (readonly [RegExp, ClaimKind])[] = [
@@ -157,12 +162,14 @@ const VERBS: readonly (readonly [RegExp, ClaimKind])[] = [
   [/\bfail(?:ed|s|ing)?\b/gi, 'failure'],
 ]
 
-/** Words just before the verb that make it the brief's ask, not what was done. */
-const ASKED_BEFORE = /\b(?:to|asked|asks|ask|told|tells|wants?|wanted|needs?|needed|should|must|supposed|expected|meant|plans?|planned)\s+(?:\S+\s+)?$/i
+/** Words shortly before the verb that make it the brief's ask, not what was done. */
+const ASKED_BEFORE =
+  /\b(?:to|asked|asks|ask|told|tells|wants?|wanted|needs?|needed|should|must|supposed|expected|meant|plans?|planned|requires?|required|instructed|allowed)\s+(?:\S+\s+){0,3}$/i
 /** Words just after a count that make it a difference or the brief's number. */
-const NOT_DONE_AFTER = /^\s+(?:more|extra|fewer|less|left|remaining|to\s+go|over|beyond|short|asked|requested|planned|needed|required|wanted|expected)\b/i
-/** Words just before a count that make it the brief's number. */
-const ASKED_COUNT_BEFORE = /\b(?:asked\s+for|asks\s+for|requested|needs|needed|wants|wanted|expected|planned|of\s+the|out\s+of)\s+$/i
+const NOT_DONE_AFTER = /^\s+(?:more|extra|fewer|less|left|remaining|to\s+go|over|beyond|short|asked|requested|planned|needed|required|wanted|expected|allowed)\b/i
+/** Words just before a count that make it the brief's number or a limit. */
+const ASKED_COUNT_BEFORE =
+  /\b(?:asked\s+for|asks\s+for|requested|requires|required|needs|needed|wants|wanted|expected|planned|allowed|of\s+the|out\s+of|up\s+to|at\s+most|at\s+least|max(?:imum)?|limit\s+of|budget\s+of|to\s+(?:do|make|run|perform|try))\s+$/i
 
 const numberOf = (word: string): number => {
   const lower = word.toLowerCase()
@@ -285,12 +292,8 @@ export function claimsIn(text: string, files: readonly string[]): Claim[] {
     const at = match.index ?? 0
     const end = at + match[0].length
     const noun = (match[4] as string).toLowerCase()
-    const isFailedNoun = match[3] !== undefined && FAILED_NOUNS.has(noun)
-    const kind: ClaimKind | undefined = isFailedNoun
-      ? 'failure'
-      : match[3] === undefined && Object.prototype.hasOwnProperty.call(NOUNS, noun)
-        ? NOUNS[noun]
-        : undefined
+    const kind: ClaimKind | undefined =
+      match[3] === undefined && Object.prototype.hasOwnProperty.call(NOUNS, noun) ? NOUNS[noun] : undefined
 
     if (
       kind === undefined ||
@@ -308,6 +311,11 @@ export function claimsIn(text: string, files: readonly string[]): Claim[] {
       .filter(one => /^[\s:]*$/.test(head.slice(Math.max(0, at - 70) + one.at + one.name.length, at)))
       .pop()
     const file = named ?? before
+
+    // "3 reads in src", "2 reads failed": a part of the whole, which the tally does not hold.
+    if (file === undefined && PART_AFTER.test(head.slice(end, end + 30))) {
+      continue
+    }
 
     if (file !== undefined && (kind === 'read' || kind === 'edit')) {
       claim.file = file.name

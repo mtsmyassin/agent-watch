@@ -27,8 +27,12 @@ test('each listed form is read', () => {
   expect(bash('cp a.py /tmp/b.py')).toEqual(['/tmp/b.py'])
   expect(bash('cp a.py b.py /tmp/')).toEqual(['/tmp/a.py', '/tmp/b.py'])
   expect(bash('cp -r -t /tmp a.py')).toEqual(['/tmp/a.py'])
-  expect(bash('mv a.py ../b.py')).toEqual(['../b.py'])
-  expect(bash('cp src/a.py ..')).toEqual(['../a.py'])
+  // A relative path that climbs is judged by its name alone: the shell may sit in another folder by now.
+  expect(bash('mv a.py ../b.py')).toEqual(['?b.py'])
+  expect(bash('cp src/a.py ..')).toEqual(['?a.py'])
+  expect(bash('cp -rt /tmp a.py')).toEqual(['/tmp/a.py'])
+  expect(bash('cp -t/tmp a.py')).toEqual(['/tmp/a.py'])
+  expect(bash('cp --target-directory=/tmp a.py')).toEqual(['/tmp/a.py'])
   expect(bash("sudo cp a.conf '/etc/app.conf'")).toEqual(['/etc/app.conf'])
 
   expect(pwsh('"x" >> C:\\x\\log.txt')).toEqual(['C:\\x\\log.txt'])
@@ -43,6 +47,14 @@ test('each listed form is read', () => {
   expect(pwsh('Move-Item a b')).toEqual(['b'])
   expect(pwsh("'x' | tee C:\\x\\t.txt")).toEqual(['C:\\x\\t.txt'])
   expect(pwsh('Get-Date | Tee-Object -Variable d')).toEqual([])
+  expect(pwsh('Set-Content -Path:C:\\x\\g.txt v')).toEqual(['C:\\x\\g.txt'])
+})
+
+test('a line continued onto the next is one command', () => {
+  expect(bash('cp .env \\\n  app.txt')).toEqual(['app.txt'])
+  expect(bash('cp .env \\\r\n  app.txt')).toEqual(['app.txt'])
+  expect(bash('cp config.txt \\\n  .env')).toEqual(['.env'])
+  expect(pwsh('Copy-Item a.py `\n  -Destination C:\\x\\b.py')).toEqual(['C:\\x\\b.py'])
 })
 
 test('reads and targets inside are not writes outside', () => {
@@ -78,6 +90,9 @@ test('what it cannot read for sure, it does not flag', () => {
     'bash -c "echo x > /etc/y"',
     'echo x > "/tmp/a.txt',
     'cp a.py',
+    'echo x > "$(cat /etc/.env)"',
+    'echo x > /dev/fd/3',
+    'echo x > /proc/self/fd/1',
   ]) {
     expect(bash(command)).toEqual([])
   }
@@ -99,6 +114,8 @@ test('quotes and heredoc bodies are text, not writes', () => {
   expect(bash('grep -c ">" a.txt')).toEqual([])
   // A comment says nothing.
   expect(bash('ls # > /etc/z')).toEqual([])
+  expect(pwsh('<# Set-Content C:\\x\\a.txt "v"\nOut-File C:\\x\\b.txt #>\nGet-Date')).toEqual([])
+  expect(pwsh('<# note #> Get-Date > C:\\x\\c.txt')).toEqual(['C:\\x\\c.txt'])
 })
 
 test('a name that may hold secrets is judged even when its folder is not sure', () => {
