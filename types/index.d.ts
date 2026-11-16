@@ -89,7 +89,13 @@ export type Sign = 'circles' | 'failing' | 'outside'
  * A change to a file that needs checking: its name (never its folders), and
  * why. The full path is judged inside the mod and kept nowhere.
  */
-export type Touch = { file: string; outside?: true; secret?: true }
+export type Touch = {
+  file: string
+  outside?: true
+  secret?: true
+  /** Written by a shell command (Bash, PowerShell) rather than an edit tool. */
+  shell?: true
+}
 
 /** A trouble sign as the card shows it: what the rules saw, and what the person can do. */
 export type Trouble = { sign: Sign; evidence: string; advice: string }

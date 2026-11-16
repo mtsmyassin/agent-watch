@@ -138,7 +138,7 @@ test('a narrator reply that miscounts reaches the page corrected, and the debug 
   await $.agent.spawn(SPAWN)
   await clock.settle()
   await $.command.run(ASK_GUI)
-  await $.tool.call({ tool: 'Read', file_path: 'C:\work\shop\config.txt', agentId: 'a1' })
+  await $.tool.call({ tool: 'Read', file_path: 'C:\\work\\shop\\config.txt', agentId: 'a1' })
   await clock.advance(2000)
 
   const cards = dataOf(r).cards
@@ -147,4 +147,32 @@ test('a narrator reply that miscounts reaches the page corrected, and the debug 
   expect(cards?.agents.a1?.told?.percent).toBeUndefined()
   expect(cards?.narrator.corrected).toBe(1)
   expect(r.logged.some(line => line.includes('narrator count corrected (1 this session)') && line.includes('the tally has 1'))).toBe(true)
+})
+
+test('a command that writes outside the project shows as trouble, naming only the file', async ($, on) => {
+  const r = rig(on)
+  const clock = mock.clock(on)
+
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+  await $.command.run(ASK_GUI)
+  await $.tool.call({
+    tool: 'PowerShell',
+    command: "Set-Content -Path C:\\Users\\me\\elsewhere\\notes.txt -Value 'debug = true'",
+    agentId: 'a1',
+  })
+  await clock.advance(2000)
+
+  expect(dataOf(r).cards?.agents.a1?.trouble).toEqual([
+    {
+      sign: 'outside',
+      evidence: 'Wrote outside this project with a command: notes.txt',
+      advice: 'It wrote notes.txt outside this project with a command. Check that change before anything else.',
+    },
+  ])
+  expect(r.asked[0]?.prompt).toContain('Trouble the rules found: Wrote outside this project with a command: notes.txt')
+  // The full path is judged inside the mod and goes nowhere.
+  expect(r.written.some(one => one.text.includes('elsewhere'))).toBe(false)
+  expect(r.asked.some(one => one.prompt.includes('elsewhere'))).toBe(false)
 })

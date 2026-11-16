@@ -7,6 +7,7 @@
 // verdict and the file's masked name are kept: the path itself goes nowhere.
 import type { Call, Kind, Sign, Touch, Trouble } from '../types'
 import { brief, lastFolder } from './roster'
+import { writtenBy } from './shell'
 import type { Notes } from './trail'
 
 /** Going in circles: the same step this many times... */
@@ -183,6 +184,17 @@ export function notesOf(
     notes.step = step
   }
 
+  // A shell command writes files too: the ones it plainly names are judged the same way.
+  if (tool === 'Bash' || tool === 'PowerShell') {
+    const touch = shellTouch(typeof input.command === 'string' ? input.command : '', tool === 'PowerShell', cwd)
+
+    if (touch !== undefined) {
+      notes.touch = touch
+    }
+
+    return notes
+  }
+
   const path = PATH_FIELDS.map(field => input[field]).find(
     (value): value is string => typeof value === 'string' && value.trim() !== '',
   )
@@ -220,6 +232,39 @@ export function notesOf(
   return notes
 }
 
+/**
+ * The write of a shell command that needs checking, if any: outside the
+ * folder (only where its folder can be judged) or to a file that may hold
+ * secrets. Of several, the one that is both, else outside, else secret.
+ * Only the file's name is kept.
+ */
+function shellTouch(command: string, isPowerShell: boolean, cwd: string): Touch | undefined {
+  let best: { rank: number; touch: Touch } | undefined
+
+  for (const target of writtenBy(command, isPowerShell)) {
+    const isOutside = target.isFolderKnown && cwd.trim() !== '' && !isInside(target.path, cwd)
+    const isSecret = isSecretName(target.name)
+    const rank = (isOutside ? 2 : 0) + (isSecret ? 1 : 0)
+
+    if (rank > 0 && (best === undefined || rank > best.rank)) {
+      const touch: Touch = { file: brief(target.name, NAME_MAX) }
+
+      if (isOutside) {
+        touch.outside = true
+      }
+
+      if (isSecret) {
+        touch.secret = true
+      }
+
+      touch.shell = true
+      best = { rank, touch }
+    }
+  }
+
+  return best?.touch
+}
+
 // --- The signs -----------------------------------------------------------------
 
 /** What makes two calls the same step: their hash, or for an older call, its kind and words. */
@@ -227,6 +272,29 @@ const stepKey = (call: Call): string => call.step ?? `${call.kind ?? ''}|${call.
 const isFailed = (call: Call): boolean => call.isFailed === true
 
 const trouble = (sign: Sign, evidence: string, advice: string): Trouble => ({ sign, evidence, advice })
+
+/** A write by a shell command that needs checking, in words. */
+function shellTrouble({ file, outside, secret }: Touch): Trouble {
+  if (outside === true && secret === true) {
+    return trouble(
+      'outside',
+      `Wrote a file that may hold secrets, outside this project, with a command: ${file}`,
+      `It wrote ${file} outside this project with a command, and it may hold secrets. Check that change before anything else.`,
+    )
+  }
+
+  return secret === true
+    ? trouble(
+        'outside',
+        `Wrote a file that may hold secrets with a command: ${file}`,
+        `It wrote ${file} with a command, and it may hold secrets. Check that change before anything else.`,
+      )
+    : trouble(
+        'outside',
+        `Wrote outside this project with a command: ${file}`,
+        `It wrote ${file} outside this project with a command. Check that change before anything else.`,
+      )
+}
 
 /** A change that needs checking, among the newest calls: the newest that went through. */
 function outsideOf(kinded: readonly Call[], from: number): Trouble | undefined {
@@ -239,6 +307,10 @@ function outsideOf(kinded: readonly Call[], from: number): Trouble | undefined {
     }
 
     const file = touch.file
+
+    if (touch.shell === true) {
+      return shellTrouble(touch)
+    }
 
     if (touch.outside === true && touch.secret === true) {
       return trouble(
