@@ -188,8 +188,141 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
 .isl-open { font: 500 12px/1.33 var(--sans); color: var(--text-primary); cursor: pointer; }
 .isl:not(.open) .isl-list, .isl:not(.open) .isl-foot { display: none; }
 
+/* --- Tabs: the cards (the main view) and the timeline, under one header ---- */
+.tabs { display: flex; gap: 6px; margin: 0 auto 0 40px; align-self: flex-end; opacity: 0; }
+.tab { height: 32px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--text-quaternary); border-radius: 2px; font: 500 12px/1 var(--sans); letter-spacing: 0.5px; cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s; }
+.tab[aria-selected="true"] { border-color: var(--crimson); box-shadow: inset 0 -2px 0 var(--crimson); }
+.tab:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+body.cards .metric { display: none; }
+.view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.view[hidden] { display: none; }
+
+/* --- The cards: who is fine, who is stuck, what each is doing, in plain words.
+   Green working, amber slow, red stuck. Small text stays in the secondary grey:
+   the tertiary grey fails WCAG AA at 11-12 px. */
+:root { --crimson: #E5383B; --amber: #D4943A; --c-surface: #101113; --c-surface-2: #16171a; --c-surface-3: #1c1d21; --c-line: #48484A;
+  --crimson-w: rgba(229, 56, 59, 0.08); --amber-w: rgba(212, 148, 58, 0.08); --emerald-w: rgba(13, 150, 104, 0.08); }
+.cv { margin: 0 32px; border-top: 1px solid var(--border-default); }
+.cv-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 2px 24px; scrollbar-width: thin; scrollbar-color: var(--text-quaternary) transparent; }
+.c-summary { display: grid; grid-template-columns: 1fr auto; gap: 10px 18px; align-items: end; margin-bottom: 14px; }
+.c-sentence { font: 400 19px/1.35 var(--sans); letter-spacing: -0.2px; min-height: 52px; }
+.c-src { display: block; margin-bottom: 4px; font: 600 11px/1.3 var(--sans); letter-spacing: 1px; text-transform: uppercase; color: var(--text-secondary); }
+.c-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.c-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--border-default); border-radius: 2px; background: var(--c-surface); font: 400 12px/1.3 var(--sans); color: var(--text-secondary); }
+.c-chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.c-teambar { grid-column: 1 / -1; display: flex; gap: 3px; height: 26px; }
+.c-tb { flex: 1 1 0; min-width: 0; position: relative; padding: 0; border: 1px solid var(--border-default); border-radius: 2px; background: var(--c-surface); overflow: hidden; cursor: pointer; }
+.c-tb.done { flex: 0.55 1 0; }
+.c-tb:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.c-tb .c-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; transform-origin: 0 50%; transform: scaleX(0); background: rgba(13, 150, 104, 0.15); transition: transform 0.8s var(--spring), background-color 0.4s; }
+.c-tb.slow .c-fill { background: rgba(212, 148, 58, 0.18); }
+.c-tb.stuck .c-fill { background: rgba(229, 56, 59, 0.16); }
+.c-tb.done .c-fill { background: rgba(255, 255, 255, 0.05); }
+.c-tb .c-lbl { position: absolute; inset: 0; display: flex; align-items: center; gap: 6px; padding: 0 8px; font: 400 11px/1 var(--sans); color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
+.c-tb .c-lbl b { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-emerald); }
+.c-tb.slow .c-lbl b { background: var(--amber); }
+.c-tb.stuck .c-lbl b { background: var(--crimson); }
+.c-tb.idle .c-lbl b { background: none; border: 1.5px solid var(--text-secondary); }
+.c-tb.done .c-lbl b { width: auto; height: auto; background: none; color: var(--accent-emerald); font-weight: 600; }
+.c-tb.done .c-lbl b::before { content: '\2713'; }
+
+.c-alert { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 10px 14px; border: 1px solid rgba(229, 56, 59, 0.4); border-radius: 2px; background: var(--crimson-w); font: 400 14px/1.4 var(--sans); }
+.c-alert[hidden] { display: none; }
+.c-alert .c-ic { color: var(--crimson); }
+.c-btn { margin-left: auto; height: 30px; padding: 0 12px; flex: none; border: 1px solid var(--border-active); border-radius: 2px; background: var(--c-surface-2); font: 500 12px/1 var(--sans); cursor: pointer; }
+.c-btn:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+
+.c-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 12px; }
+.c-empty { padding: 28px 0; font: 400 14px/1.47 var(--sans); color: var(--text-secondary); }
+.c-card { position: relative; padding: 13px 15px 12px; border: 1px solid var(--border-default); border-left: 3px solid var(--accent-emerald); border-radius: 2px; background: var(--c-surface); cursor: default; transition: border-color 0.4s, background-color 0.4s; }
+.c-card:focus-visible, .c-done:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.c-card.slow { border-left-color: var(--amber); background: linear-gradient(90deg, var(--amber-w), transparent 55%), var(--c-surface); }
+.c-card.stuck { border-left-color: var(--crimson); background: linear-gradient(90deg, var(--crimson-w), transparent 55%), var(--c-surface); }
+.c-card.idle { border-left-color: var(--c-line); }
+.c-card.pinned { box-shadow: inset 0 0 0 1px var(--border-active); }
+.c-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.c-name { min-width: 0; font: 600 15px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-type, .c-time { flex: none; font: 400 12px/1.3 var(--sans); color: var(--text-secondary); }
+.c-time { font-family: var(--mono); }
+.c-health { margin-left: auto; flex: none; display: flex; align-items: center; gap: 7px; font: 400 12px/1.3 var(--sans); color: var(--text-secondary); cursor: help; }
+.c-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-emerald); }
+.c-card.working .c-dot { animation: breathe 2.4s ease-in-out infinite; animation-delay: var(--phase, 0ms); }
+.c-card.slow .c-dot { background: var(--amber); }
+.c-card.stuck .c-dot { background: var(--crimson); }
+.c-card.idle .c-dot { background: none; border: 1.5px solid var(--text-secondary); }
+.c-doing { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0 8px; min-height: 26px; }
+.c-ico { flex: none; width: 22px; height: 22px; margin-top: 1px; color: var(--accent-emerald); }
+.c-ico svg { width: 22px; height: 22px; display: block; }
+.c-card.slow .c-ico { color: var(--amber); }
+.c-card.stuck .c-ico { color: var(--crimson); }
+.c-now { min-width: 0; font: 400 16px/1.4 var(--sans); }
+.c-now.tech { padding-top: 2px; font: 400 13px/1.45 var(--mono); }
+.c-note { margin: -4px 0 8px 32px; font: 400 12px/1.3 var(--sans); color: var(--text-secondary); font-style: italic; }
+.c-note.plain { color: var(--amber); font-style: normal; }
+.c-note:empty { display: none; }
+.c-row { display: grid; grid-template-columns: 1fr 130px; gap: 14px; align-items: end; }
+.c-stage { cursor: help; }
+.c-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.c-seg { height: 7px; position: relative; overflow: hidden; border-radius: 2px; background: var(--c-surface-3); }
+.c-seg i { position: absolute; inset: 0; transform-origin: 0 50%; transform: scaleX(0); background: var(--accent-emerald); transition: transform 0.8s var(--spring), opacity 0.4s; }
+.c-seg.past i { transform: scaleX(1); opacity: 0.55; }
+.c-seg.cur i { transform: scaleX(1); }
+.c-card.slow .c-seg i { background: var(--amber); }
+.c-card.stuck .c-seg i { background: var(--crimson); }
+.c-phases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 4px; font: 400 11px/1.3 var(--sans); color: var(--text-secondary); }
+.c-phases span.cur { color: var(--text-primary); font-weight: 500; }
+.c-spark { width: 130px; height: 30px; cursor: help; display: block; }
+.c-spark polyline { fill: none; stroke: var(--accent-emerald); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.c-spark path { fill: var(--emerald-w); stroke: none; }
+.c-card.slow .c-spark polyline { stroke: var(--amber); }
+.c-card.stuck .c-spark polyline { stroke: var(--crimson); }
+.c-reason { margin-top: 8px; font: 400 12px/1.4 var(--sans); color: var(--text-secondary); }
+.c-card.stuck .c-reason { color: var(--crimson); }
+.c-reason:empty { display: none; }
+.c-found { margin-top: 10px; display: flex; gap: 8px; font: 400 13px/1.45 var(--sans); color: var(--text-secondary); }
+.c-found b { flex: none; padding-top: 2px; font: 500 11px/1.3 var(--sans); letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-secondary); }
+.c-nums { margin-top: 8px; font: 400 12px/1.4 var(--sans); color: var(--text-secondary); }
+.c-nums summary { width: max-content; cursor: pointer; list-style: none; }
+.c-nums summary::before { content: '\25B8  '; }
+.c-nums[open] summary::before { content: '\25BE  '; }
+.c-nums summary:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.c-nums div { display: flex; gap: 18px; margin-top: 6px; font-family: var(--mono); }
+
+.c-donelist { margin-top: 18px; }
+.c-donelist[hidden] { display: none; }
+.c-donelist h2 { margin: 0 0 6px; font: 600 11px/1.3 var(--sans); letter-spacing: 1px; text-transform: uppercase; color: var(--text-secondary); }
+.c-donelist ul { list-style: none; }
+.c-done { display: flex; gap: 12px; align-items: baseline; margin-bottom: 6px; padding: 9px 12px; border: 1px solid var(--border-default); border-radius: 2px; background: var(--c-surface); min-width: 0; }
+.c-done.pinned { box-shadow: inset 0 0 0 1px var(--border-active); }
+.c-ck { flex: none; color: var(--accent-emerald); font-weight: 600; }
+.c-done.bad .c-ck { color: var(--text-secondary); }
+.c-dn { flex: none; max-width: 260px; font: 600 14px/1.3 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-ds { min-width: 0; font: 400 13px/1.4 var(--sans); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-dt { margin-left: auto; flex: none; font: 400 12px/1.3 var(--mono); color: var(--text-secondary); }
+
+.c-foot { flex: none; display: flex; gap: 22px; flex-wrap: wrap; justify-content: space-between; padding: 9px 0 12px; border-top: 1px solid var(--border-default); font: 400 12px/1.4 var(--sans); color: var(--text-secondary); }
+.c-foot .c-cost { font-family: var(--mono); }
+
+/* The explanation: what it is fixing, how, what is next. Text only, set as text. */
+.c-pop { position: fixed; left: 0; top: 0; z-index: 45; width: 360px; padding: 13px 15px; border: 1px solid var(--border-active); border-radius: 2px; background: var(--c-surface-2); font: 400 13px/1.5 var(--sans); pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity 0.15s ease-out, transform 0.15s ease-out; box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55); }
+.c-pop.show { opacity: 1; transform: none; }
+.c-pop.pinned { pointer-events: auto; border-color: var(--c-line); }
+.c-pop.stuck { border-color: rgba(229, 56, 59, 0.5); }
+.c-pop h3 { margin: 11px 0 3px; font: 600 11px/1.3 var(--sans); letter-spacing: 1px; text-transform: uppercase; color: var(--text-secondary); }
+.c-pop h3:first-child { margin-top: 0; }
+.c-pop p { line-height: 1.5; }
+.c-pop .c-next { color: var(--text-secondary); }
+.c-pop .c-why { margin-top: 8px; font-size: 12px; color: var(--amber); }
+.c-pop .c-meta { margin-top: 11px; display: flex; justify-content: space-between; gap: 10px; font: 400 12px/1.3 var(--sans); color: var(--text-secondary); }
+.c-stip { position: fixed; left: 0; top: 0; z-index: 46; max-width: 300px; padding: 8px 10px; border: 1px solid var(--border-active); border-radius: 2px; background: var(--c-surface-3); font: 400 12px/1.45 var(--sans); pointer-events: none; opacity: 0; transition: opacity 0.15s ease-out; }
+.c-stip.on { opacity: 1; }
+.isl-team { padding: 10px 20px; border-bottom: 1px solid var(--border-default); font: 400 13px/1.4 var(--sans); }
+.isl-row.stuck .mark .dot::before { background: var(--crimson); }
+
 @media (hover: hover) and (pointer: fine) {
-  .ghost:hover { border-color: var(--border-active); background: rgba(255, 255, 255, 0.03); }
+  .ghost:hover, .tab:hover, .c-btn:hover { border-color: var(--border-active); background: rgba(255, 255, 255, 0.03); }
+  .c-card:hover { border-top-color: var(--border-active); border-right-color: var(--border-active); border-bottom-color: var(--border-active); }
+  .c-tb:hover { border-color: var(--border-active); }
   .lane:not(.sel):hover { background: rgba(255, 255, 255, 0.018); }
   .isl-pill:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)); }
 }
@@ -203,6 +336,10 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
 <div class="app" id="app">
   <header class="head">
     <div class="id"><h1>Agents</h1><p class="sub" id="sub">Waiting for the session</p></div>
+    <div class="tabs" role="tablist" aria-label="Views">
+      <button class="tab" id="tabCards" type="button" role="tab" aria-selected="true" aria-controls="cardsView">Cards</button>
+      <button class="tab" id="tabTimeline" type="button" role="tab" aria-selected="false" aria-controls="timelineView" tabindex="-1">Timeline</button>
+    </div>
     <div class="metrics">
       <div class="metric"><div class="value live" id="mRun"></div><span class="label">Running</span></div>
       <div class="metric"><div class="value" id="mDone"></div><span class="label">Done</span></div>
@@ -211,6 +348,24 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
       <button class="ghost" id="float" type="button">Float on top</button>
     </div>
   </header>
+  <div class="view cv" id="cardsView" role="tabpanel" aria-labelledby="tabCards">
+    <div class="cv-scroll" id="cvScroll">
+      <section class="c-summary" aria-label="The team">
+        <p class="c-sentence" aria-live="polite"><span class="c-src" id="teamSrc">The team</span><span id="team">Waiting for the session</span></p>
+        <div class="c-chips" id="chips"></div>
+        <div class="c-teambar" id="teambar" role="group" aria-label="Every agent at a glance"></div>
+      </section>
+      <div class="c-alert" id="alert" role="status" hidden><span class="c-ic" aria-hidden="true">&#9888;</span><span id="alertTxt"></span><button class="c-btn" id="alertBtn" type="button">Show me</button></div>
+      <div class="c-grid" id="cardGrid"></div>
+      <p class="c-empty" id="cEmpty">No agents yet. Start some in Claude Code and they appear here.</p>
+      <section class="c-donelist" id="doneList" aria-labelledby="doneHead" hidden><h2 id="doneHead">Finished</h2><ul id="doneRows"></ul></section>
+    </div>
+    <footer class="c-foot">
+      <span>Hover a card, or focus it, for what it is fixing and how. Click to keep it open; Esc closes. Green working, amber slow, red stuck.</span>
+      <span class="c-cost" id="narrLine"></span>
+    </footer>
+  </div>
+  <div class="view" id="timelineView" role="tabpanel" aria-labelledby="tabTimeline" hidden>
   <section class="timeline" id="timeline" aria-label="Timeline of each agent's tool calls">
     <div class="axis"><span class="label">Agent</span><div class="ticks" id="ticks"><span class="now" id="nowlabel"></span></div></div>
     <div class="lanes" id="lanes">
@@ -236,10 +391,13 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
       <p class="result" id="result"></p>
     </aside>
   </section>
+  </div>
 </div>
+<div class="c-pop" id="pop"></div>
+<div class="c-stip" id="stip" aria-hidden="true"></div>
 <div class="frame" id="frame" aria-hidden="true"></div>
 <button class="dock" id="dock" type="button" hidden><span class="mark" id="dockMark" data-s="running"><span class="dot"></span><span class="chk">&#10003;</span></span><span id="dockMain"></span><span class="hint">Floating on top. Click to bring it back.</span></button>
-<div class="tip" id="tip" role="tooltip"></div>
+<div class="tip" id="tip" aria-hidden="true"></div>
 <script src="motion.js"></script>
 <script>
 (() => {
@@ -414,6 +572,8 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
   let island = null
   let pip = null
   let notice = null
+  /** Which tab shows: the cards (the main view) or the timeline. */
+  let view = 'cards'
 
   const nowMs = () => {
     if (!data) return Date.now()
@@ -446,9 +606,16 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
   function startPolling(host) {
     pollHost.clearInterval(pollTimer)
     pollHost = host
-    pollTimer = host.setInterval(() => { poll(); if (island) drawIsland() }, 250)
+    pollTimer = host.setInterval(() => {
+      poll()
+      if (island) drawIsland()
+      // The cards' clocks, health lights and quiet timers step once a second.
+      const second = Math.floor(Date.now() / 1000)
+      if (second !== cardSecond && !IS_ISLAND && data) { cardSecond = second; drawCards(false) }
+    }, 250)
     poll()
   }
+  let cardSecond = 0
   function watchPulse() {
     const stale = !!data && data.agents.some(isLive) && Date.now() - data.beatAt > STALE_MS
     if (stale === isStale) return
@@ -486,6 +653,7 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
     if (!selected && next.agents.length) select(next.agents[0].id, false)
     later(ended ? 320 : 0, drawHead)
     drawDetail(false)
+    drawCards(true)
     if (island) drawIsland()
     isLoading = false
     kick()
@@ -743,9 +911,9 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
     if (isMoving()) kick()
   }
   const isMoving = () => !!data && (scaleRun !== null || (!isStale && (flying.size > 0 || data.agents.some(isLive))))
-  /** One frame is asked for; a still page asks for none. */
+  /** One frame is asked for; a still page asks for none, nor a hidden timeline. */
   function kick() {
-    if (raf) return
+    if (raf || view !== 'timeline') return
     raf = RM ? setTimeout(frame, 500) : requestAnimationFrame(frame)
   }
 
@@ -957,6 +1125,507 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
     tip.classList.remove('on')
   })
 
+  // --- The cards ------------------------------------------------------------
+  // One card per working agent, in plain words: what it is doing now, its
+  // stage, its health, what it found. The words come from the mod's `cards`
+  // value, written ahead of time (this page can ask nothing). With no such
+  // value (an older mod) every card falls back to the plain rules. Every word
+  // that came from the data is set as text, never as markup.
+  const LIMITS = { slowMs: 60000, stuckMs: 120000 }
+  const STAGES = ['looking', 'changing', 'checking', 'reporting']
+  const STAGE_OF = { read: 'looking', search: 'looking', edit: 'changing', test: 'checking', write: 'reporting' }
+  const STAGE_WORD = { looking: 'looking around', changing: 'making changes', checking: 'checking its work', reporting: 'reporting' }
+  const KIND_WORD = { read: 'Reading', search: 'Searching', edit: 'Changing files', test: 'Testing', run: 'Running a command', write: 'Writing the report', wait: 'Waiting' }
+  const HEALTH_WORD = { working: 'working', slow: 'slow', stuck: 'stuck', idle: 'resting', done: 'done' }
+  const RANK = { stuck: 0, slow: 1, working: 2, idle: 3 }
+  // Static outlines; no data goes into them.
+  const ICONS = {
+    read: '<path d="M3 5.5C5.5 4 8.5 4 11 5.5v13C8.5 17 5.5 17 3 18.5z M21 5.5C18.5 4 15.5 4 13 5.5v13c2.5-1.5 5.5-1.5 8 0z"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>',
+    edit: '<path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/><path d="M14 7l3 3"/>',
+    test: '<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/>',
+    run: '<rect x="3" y="4.5" width="18" height="15" rx="1.5"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/>',
+    write: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
+    wait: '<path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9"/>',
+  }
+  const TIPS = {
+    health: () => {
+      const lim = limits()
+      return `Health light. Green: it took a step in the last ${plainSpan(lim.slowMs)}. Amber: no new step for ${plainSpan(lim.slowMs)}, thinking or waiting on a command. Red: no new step for ${plainSpan(lim.stuckMs)}, probably stuck.`
+    },
+    strip: 'Stages: looking (reading and searching), changing (editing files), checking (running tests or checks), reporting (writing up what it did). It can go back a stage, for example when a test fails.',
+    spark: 'Activity over the last minute: each rise is a step it took. A flat line means it has gone quiet.',
+  }
+  const cardGridEl = $('cardGrid'), doneRowsEl = $('doneRows'), teambarEl = $('teambar'), popEl = $('pop'), stipEl = $('stip')
+  /** id → what the page keeps for one card, one finished row, one team-bar segment. */
+  const cardViews = new Map(), doneViews = new Map(), barViews = new Map()
+  let pinned = null, hovered = null
+
+  /** Sets a node's text only when it changed. */
+  function put(node, text) {
+    const value = text == null ? '' : String(text)
+    if (node.textContent !== value) node.textContent = value
+  }
+  /** A length of time in plain words: `45 s`, `2 min 05 s`. */
+  function plainSpan(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000))
+    if (s < 60) return `${s} s`
+    const m = Math.floor(s / 60)
+    if (m >= 60) return `${Math.floor(m / 60)} h ${pad(m % 60)} min`
+    return s % 60 ? `${m} min ${pad(s % 60)} s` : `${m} min`
+  }
+  const ago = ms => (ms < 5000 ? 'just now' : `${plainSpan(ms)} ago`)
+  /** A card's name: the task the agent was given, said as a heading. */
+  function nameOf(a) {
+    const task = (a.task || '').trim()
+    return task ? task.charAt(0).toUpperCase() + task.slice(1) : a.type
+  }
+  const limits = () => (data && data.cards && data.cards.limits) || LIMITS
+  /** The newest call in flight, else the last one that had a kind. */
+  function kindFromCalls(a) {
+    const kinded = a.calls.filter(c => c.kind)
+    const open = kinded.filter(c => c.end === undefined)
+    const last = open[open.length - 1] || kinded[kinded.length - 1]
+    return last ? last.kind : undefined
+  }
+  /** The mod's card for an agent, or the rules' own from its calls (an older mod). */
+  function cardOf(a) {
+    const given = data && data.cards && data.cards.agents ? data.cards.agents[a.id] : undefined
+    if (given && typeof given === 'object' && given.plain) return given
+    let stage = 'looking'
+    for (const c of a.calls) stage = STAGE_OF[c.kind] || stage
+    const done = a.calls.filter(c => c.end !== undefined)
+    return {
+      stage: isLive(a) ? stage : 'reporting',
+      kind: kindFromCalls(a),
+      quietSince: a.seenAt,
+      plain: { now: doing(a), found: isLive(a) ? (done.length ? done[done.length - 1].did : '') : a.result || a.summary || '' },
+      mode: isLive(a) ? 'plain' : 'own',
+    }
+  }
+  /** Green, amber, red from how long the agent has been quiet, by the mod's own limits. */
+  function healthOf(a, card, now) {
+    if (!isLive(a)) return 'done'
+    if (a.state === 'idle') return 'idle'
+    const quiet = now - (card.quietSince || a.seenAt)
+    const lim = limits()
+    return quiet >= lim.stuckMs ? 'stuck' : quiet >= lim.slowMs ? 'slow' : 'working'
+  }
+  const narrator = () => (data && data.cards ? data.cards.narrator : null)
+  /** True when the card shows the narrator's words. */
+  const isTold = card => !!card.told && (card.mode === 'told' || card.mode === 'writing')
+  /** The plain-rules note: why the narrator's words are not shown. */
+  function plainNote() {
+    const n = narrator()
+    if (!n) return 'Plain rules: the narrator is offline'
+    return n.state === 'off' ? 'Plain rules: the narrator is off' : 'Plain rules: the narrator is offline'
+  }
+  /** What a finished agent came to: the narrator's result once it is written, else its own answer. */
+  function resultOf(a, card) {
+    if (card.mode === 'told' && card.told) return card.told.how
+    return a.result || a.summary || card.plain.found || (a.state === 'failed' ? 'It failed before it could answer.' : a.state === 'killed' ? 'It was stopped.' : 'It finished without a written answer.')
+  }
+  /** Activity over the last minute: calls begun in each of twelve 5 s bins. */
+  function sparkOf(a, now) {
+    const W = 130, H = 30, BINS = 12, SPAN = 60000, counts = new Array(BINS).fill(0)
+    const from = now - SPAN
+    for (let i = a.calls.length - 1; i >= 0; i--) {
+      const c = a.calls[i]
+      if (c.at <= from) break
+      if (c.at <= now) counts[Math.min(BINS - 1, Math.floor((c.at - from) / (SPAN / BINS)))] += 1
+    }
+    const pts = counts.map((n, i) => [(i * W) / (BINS - 1), H - 3 - (Math.min(n, 4) / 4) * (H - 6)])
+    const line = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+    return { line, area: `M0,${H} L${line.split(' ').join(' L')} L${W},${H} Z` }
+  }
+  const svgIcon = kind => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[kind] || ICONS.wait}</svg>`
+
+  function mountCard(a) {
+    const root = el('article', 'c-card')
+    root.tabIndex = 0
+    root.dataset.id = a.id
+    const head = el('div', 'c-head'), name = el('span', 'c-name'), type = el('span', 'c-type'), time = el('span', 'c-time')
+    const health = el('span', 'c-health'), dot = el('span', 'c-dot'), hl = el('span', 'c-hl')
+    health.dataset.tip = 'health'
+    health.setAttribute('role', 'img')
+    dot.style.setProperty('--phase', `-${Math.round(performance.now() % 2400)}ms`)
+    health.append(dot, hl)
+    head.append(name, type, time, health)
+    const doingRow = el('div', 'c-doing'), ico = el('span', 'c-ico'), now = el('p', 'c-now')
+    doingRow.append(ico, now)
+    const note = el('p', 'c-note')
+    const row = el('div', 'c-row'), stageBox = el('div', 'c-stage'), strip = el('div', 'c-strip'), phases = el('div', 'c-phases')
+    stageBox.dataset.tip = 'strip'
+    stageBox.setAttribute('role', 'img')
+    const segs = STAGES.map(() => { const s = el('span', 'c-seg'); s.append(el('i')); strip.append(s); return s })
+    const labels = STAGES.map(word => { const s = el('span', '', word); phases.append(s); return s })
+    stageBox.append(strip, phases)
+    const NS = 'http://www.w3.org/2000/svg'
+    const spark = document.createElementNS(NS, 'svg'), area = document.createElementNS(NS, 'path'), line = document.createElementNS(NS, 'polyline')
+    spark.setAttribute('class', 'c-spark')
+    spark.setAttribute('viewBox', '0 0 130 30')
+    spark.setAttribute('preserveAspectRatio', 'none')
+    spark.setAttribute('role', 'img')
+    spark.setAttribute('aria-label', 'Activity over the last minute')
+    spark.dataset.tip = 'spark'
+    spark.append(area, line)
+    row.append(stageBox, spark)
+    const reason = el('p', 'c-reason')
+    const found = el('p', 'c-found'), foundLabel = el('b', '', 'Found so far'), foundText = el('span')
+    found.append(foundLabel, foundText)
+    const nums = el('details', 'c-nums'), summary = el('summary', '', 'Numbers'), numRow = el('div')
+    const n1 = el('span'), n2 = el('span'), n3 = el('span')
+    numRow.append(n1, n2, n3)
+    nums.append(summary, numRow)
+    root.append(head, doingRow, note, row, reason, found, nums)
+    cardGridEl.append(root)
+    const card = { id: a.id, root, name, type, time, health, hl, ico, now, note, stageBox, segs, labels, area, line, reason, foundLabel, foundText, n1, n2, n3, kind: '', state: '' }
+    if (!isLoading && !RM) root.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.2,.8,.2,1)' })
+    cardViews.set(a.id, card)
+    return card
+  }
+
+  function drawCard(card, a, c, health, now) {
+    const told = isTold(c)
+    const state = `c-card ${health}${pinned === a.id ? ' pinned' : ''}`
+    if (card.root.className !== state) card.root.className = state
+    put(card.name, nameOf(a))
+    put(card.type, a.type)
+    put(card.time, plainSpan(now - a.startedAt))
+    const quiet = now - (c.quietSince || a.seenAt)
+    put(card.hl, health === 'slow' || health === 'stuck' ? `${HEALTH_WORD[health]} · ${plainSpan(quiet)} quiet` : HEALTH_WORD[health])
+    const healthSaid = `Health: ${HEALTH_WORD[health]}${health === 'slow' || health === 'stuck' ? `, no new step for ${plainSpan(quiet)}` : ''}`
+    if (card.health.getAttribute('aria-label') !== healthSaid) card.health.setAttribute('aria-label', healthSaid)
+    const kind = health === 'slow' || health === 'stuck' ? 'wait' : c.kind || 'wait'
+    if (card.kind !== kind) { card.kind = kind; card.ico.innerHTML = svgIcon(kind); card.ico.title = KIND_WORD[kind] || '' }
+    put(card.now, told ? c.told.now : c.plain.now)
+    card.now.classList.toggle('tech', !told)
+    put(card.note, c.mode === 'writing' ? 'Writing an update' : told ? '' : plainNote())
+    card.note.classList.toggle('plain', !told && c.mode !== 'writing')
+    const at = Math.max(0, STAGES.indexOf(c.stage))
+    card.segs.forEach((seg, i) => { seg.classList.toggle('past', i < at); seg.classList.toggle('cur', i === at) })
+    card.labels.forEach((label, i) => label.classList.toggle('cur', i === at))
+    const stageSaid = `Stage ${at + 1} of 4: ${STAGE_WORD[c.stage] || c.stage}`
+    if (card.stageBox.getAttribute('aria-label') !== stageSaid) card.stageBox.setAttribute('aria-label', stageSaid)
+    const spark = sparkOf(a, now)
+    if (card.line.getAttribute('points') !== spark.line) { card.line.setAttribute('points', spark.line); card.area.setAttribute('d', spark.area) }
+    put(card.reason, health === 'stuck'
+      ? `No new step for ${plainSpan(quiet)}. Probably waiting on something slow.`
+      : health === 'slow' ? `No new step for ${plainSpan(quiet)}. Thinking, or waiting on a command.` : '')
+    put(card.foundLabel, told ? 'Found so far' : 'Last step')
+    put(card.foundText, told ? c.told.found || 'Nothing yet' : c.plain.found || 'None yet')
+    put(card.n1, plural(a.tools, 'tool'))
+    put(card.n2, `${amount(a.tokens)} tokens`)
+    put(card.n3, `${clock(now - a.startedAt)} running`)
+    const said = `${nameOf(a)}, ${a.type}, ${HEALTH_WORD[health]}`
+    if (card.root.getAttribute('aria-label') !== said) card.root.setAttribute('aria-label', said)
+  }
+
+  function mountDone(a) {
+    const root = el('li', 'c-done')
+    root.tabIndex = 0
+    root.dataset.id = a.id
+    const ck = el('span', 'c-ck'), name = el('span', 'c-dn'), sum = el('span', 'c-ds'), time = el('span', 'c-dt')
+    ck.setAttribute('aria-hidden', 'true')
+    root.append(ck, name, sum, time)
+    doneRowsEl.prepend(root)
+    if (!isLoading && !RM) root.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 360 })
+    const row = { id: a.id, root, ck, name, sum, time }
+    doneViews.set(a.id, row)
+    return row
+  }
+
+  function drawDone(row, a, c) {
+    const bad = a.state === 'failed' || a.state === 'killed'
+    const cls = `c-done${bad ? ' bad' : ''}${pinned === a.id ? ' pinned' : ''}`
+    if (row.root.className !== cls) row.root.className = cls
+    put(row.ck, a.state === 'failed' ? '✗' : a.state === 'killed' ? '■' : '✓')
+    put(row.name, nameOf(a))
+    put(row.sum, resultOf(a, c))
+    put(row.time, plainSpan((a.endedAt || a.seenAt) - a.startedAt))
+    const said = `${nameOf(a)}, ${ENDED[a.state] || 'finished'}`
+    if (row.root.getAttribute('aria-label') !== said) row.root.setAttribute('aria-label', said)
+  }
+
+  function drawBar(a, c, health, index) {
+    let bar = barViews.get(a.id)
+    if (!bar) {
+      const root = el('button', 'c-tb'), fill = el('span', 'c-fill'), lbl = el('span', 'c-lbl'), b = el('b'), name = el('span')
+      root.type = 'button'
+      b.setAttribute('aria-hidden', 'true')
+      lbl.append(b, name)
+      root.append(fill, lbl)
+      root.addEventListener('click', () => showAgent(a.id, false))
+      bar = { root, fill, name }
+      barViews.set(a.id, bar)
+    }
+    if (teambarEl.children[index] !== bar.root) teambarEl.insertBefore(bar.root, teambarEl.children[index] || null)
+    const cls = `c-tb ${health}`
+    if (bar.root.className !== cls) bar.root.className = cls
+    put(bar.name, nameOf(a))
+    const share = health === 'done' ? 1 : (Math.max(0, STAGES.indexOf(c.stage)) + 1) / 4
+    const scale = `scaleX(${share})`
+    if (bar.fill.style.transform !== scale) bar.fill.style.transform = scale
+    const said = `${nameOf(a)}: ${HEALTH_WORD[health]}, ${health === 'done' ? ENDED[a.state] || 'finished' : STAGE_WORD[c.stage] || c.stage}. Show its card.`
+    if (bar.root.getAttribute('aria-label') !== said) bar.root.setAttribute('aria-label', said)
+  }
+
+  /** The cards in their order: stuck first, then slow, then the rest as the session lists them. */
+  function seatCards(order) {
+    const now = [...cardGridEl.children]
+    if (order.length === now.length && order.every((card, i) => card.root === now[i])) return
+    const before = RM ? null : new Map(order.map(card => [card, card.root.getBoundingClientRect()]))
+    for (const card of order) cardGridEl.append(card.root)
+    if (!before) return
+    // Each card glides from where it was: transform only.
+    for (const card of order) {
+      const was = before.get(card), is = card.root.getBoundingClientRect()
+      const dx = was.left - is.left, dy = was.top - is.top
+      if (was.width && (dx || dy)) card.root.animate([{ transform: `translate(${dx}px,${dy}px)` }, { transform: 'none' }], { duration: 550, easing: 'cubic-bezier(.2,.8,.2,1)' })
+    }
+  }
+
+  /** Draws the cards view; with `isNews`, after new data, else for the clocks. */
+  function drawCards(isNews) {
+    // A hidden tab is left alone: showing it draws it whole.
+    if (IS_ISLAND || !data || view !== 'cards') return
+    const now = nowMs()
+    const list = data.agents
+    const counts = { working: 0, slow: 0, stuck: 0, idle: 0, done: 0 }
+    const live = [], over = []
+    list.forEach((a, i) => {
+      const c = cardOf(a)
+      const health = healthOf(a, c, now)
+      counts[health] += 1
+      ;(health === 'done' ? over : live).push({ a, c, health, i })
+    })
+    // The team sentence: the narrator's, or the counts.
+    const n = narrator(), team = data.cards && data.cards.team
+    if (team && n && n.state !== 'off') {
+      put($('team'), team.text)
+      put($('teamSrc'), `The team, in plain words · written ${ago(Date.now() - team.at)}`)
+    } else {
+      const parts = ['working', 'slow', 'stuck', 'idle', 'done'].filter(k => counts[k]).map(k => `${counts[k]} ${k === 'done' ? 'finished' : HEALTH_WORD[k]}`)
+      put($('team'), list.length ? `${plural(list.length, 'agent')}: ${parts.join(', ')}.` : 'No agents yet.')
+      put($('teamSrc'), 'The team (plain rules)')
+    }
+    // The count chips.
+    const chips = [['working', 'var(--accent-emerald)'], ['slow', 'var(--amber)'], ['stuck', 'var(--crimson)'], ['done', 'var(--c-line)']]
+    const chipsEl = $('chips')
+    if (!chipsEl.children.length) {
+      for (const [, color] of chips) {
+        const chip = el('span', 'c-chip'), dot = el('i'), text = el('span')
+        dot.style.background = color
+        dot.setAttribute('aria-hidden', 'true')
+        chip.append(dot, text)
+        chipsEl.append(chip)
+      }
+    }
+    chips.forEach(([k], i) => put(chipsEl.children[i].lastChild, `${counts[k]} ${k === 'done' ? 'finished' : k}`))
+    // The team bar: live agents first, then the finished, one segment each.
+    const seen = new Set()
+    ;[...live, ...over].forEach(({ a, c, health }, index) => { seen.add(a.id); drawBar(a, c, health, index) })
+    for (const [id, bar] of barViews) if (!seen.has(id)) { bar.root.remove(); barViews.delete(id) }
+    // The attention banner names who is stuck.
+    const stuck = live.filter(x => x.health === 'stuck')
+    const alertEl = $('alert')
+    alertEl.hidden = stuck.length === 0
+    if (stuck.length) {
+      put($('alertTxt'), `${stuck.map(x => `${nameOf(x.a)} has had no new step for ${plainSpan(now - (x.c.quietSince || x.a.seenAt))}.`).join(' ')} Hover it for what to do.`)
+      $('alertBtn').dataset.id = stuck[0].a.id
+    }
+    // The cards of the live agents.
+    const order = live.slice().sort((x, y) => RANK[x.health] - RANK[y.health] || x.i - y.i).map(({ a, c, health }) => {
+      const card = cardViews.get(a.id) || mountCard(a)
+      drawCard(card, a, c, health, now)
+      return card
+    })
+    const liveIds = new Set(live.map(x => x.a.id))
+    for (const [id, card] of cardViews) if (!liveIds.has(id)) { card.root.remove(); cardViews.delete(id) }
+    seatCards(order)
+    // The finished, folded to one line each, newest on top.
+    const overIds = new Set(over.map(x => x.a.id))
+    for (const { a, c } of over.slice().reverse()) drawDone(doneViews.get(a.id) || mountDone(a), a, c)
+    for (const [id, row] of doneViews) if (!overIds.has(id)) { row.root.remove(); doneViews.delete(id) }
+    $('doneList').hidden = over.length === 0
+    $('cEmpty').hidden = list.length > 0
+    // What the narrator has cost this session.
+    put($('narrLine'), costLine())
+    if (pinned && !list.some(a => a.id === pinned)) pinned = null
+    if (hovered && !list.some(a => a.id === hovered)) hovered = null
+    fillPop()
+    if (isNews && island) drawIsland()
+  }
+
+  function costLine() {
+    const n = narrator()
+    if (!n) return 'Narrator: not in this version of the mod. Plain rules.'
+    if (n.state === 'off') return 'Narrator off in the options: plain rules, no model calls.'
+    const model = /haiku/i.test(n.model) ? 'Haiku' : n.model
+    const spent = `${n.calls} of ${n.limit} calls · ${amount(n.tokensIn + n.cacheRead + n.cacheWrite)} tokens in · ${amount(n.tokensOut)} out`
+    if (n.state === 'halted') return `Narrator stopped: ${n.why || 'it hit its limit'} ${spent}`
+    return `Narrator (${model}): ${spent}${n.inFlight ? ' · writing' : ''}${n.failed ? ` · ${n.failed} failed` : ''}`
+  }
+
+  // --- The explanation: hover, focus, or click to pin; Esc closes ---------------
+  function section(title, text, cls) {
+    const frag = document.createDocumentFragment()
+    frag.append(el('h3', '', title))
+    frag.append(el('p', cls || '', text))
+    return frag
+  }
+  function fillPop() {
+    const id = pinned || hovered
+    const a = id && data ? data.agents.find(x => x.id === id) : null
+    const anchor = a ? (cardViews.get(id) || doneViews.get(id) || {}).root : null
+    if (!a || !anchor || view !== 'cards') {
+      if (popEl.classList.contains('show')) popEl.className = 'c-pop'
+      // A tooltip with nothing in it has no name: it is one only while it shows.
+      popEl.removeAttribute('role')
+      return
+    }
+    popEl.setAttribute('role', 'tooltip')
+    const now = nowMs(), c = cardOf(a), health = healthOf(a, c, now), told = isTold(c) ? c.told : null
+    const isOver = health === 'done'
+    const parts = []
+    const what = told && told.what ? told.what : `${nameOf(a)} (the task it was given)`
+    parts.push(section(isOver ? 'What it was fixing' : "What it's fixing", what))
+    if (isOver) {
+      parts.push(section('Result', resultOf(a, c)))
+      if (c.mode === 'told' && told && told.next) parts.push(section('Next', told.next, 'c-next'))
+    } else if (told) {
+      parts.push(section('How', told.how))
+      if (told.next) parts.push(section('Next', told.next, 'c-next'))
+    } else {
+      parts.push(section('Now', c.plain.now))
+      if (c.plain.found) parts.push(section('Last step', c.plain.found, 'c-next'))
+    }
+    if (health === 'stuck' && !told) {
+      parts.push(section('What to do', `It has had no new step for ${plainSpan(now - (c.quietSince || a.seenAt))}. If it stays stuck, stop it in Claude Code and give it a narrower task.`, 'c-next'))
+    }
+    if (!told && c.mode === 'plain' && c.why) parts.push(el('p', 'c-why', c.why))
+    const meta = el('div', 'c-meta')
+    meta.append(el('span', '', `${nameOf(a)}${pinned === id ? ' · pinned, Esc to close' : ''}`))
+    meta.append(el('span', '', told ? `written ${ago(Date.now() - told.at)}` : c.mode === 'own' ? 'from its own answer' : 'plain rules'))
+    parts.push(meta)
+    popEl.replaceChildren(...parts)
+    popEl.className = `c-pop show${pinned === id ? ' pinned' : ''}${health === 'stuck' ? ' stuck' : ''}`
+    const box = anchor.getBoundingClientRect(), w = 360, h = popEl.offsetHeight
+    let left = box.right + 10
+    let top = Math.max(70, Math.min(box.top, innerHeight - h - 16))
+    if (left + w > innerWidth - 10) left = box.left - w - 10
+    if (left < 10) {
+      // No room beside it (a finished row runs the full width): below it, or above.
+      left = Math.min(innerWidth - w - 10, box.left + 20)
+      top = box.bottom + 8 + h <= innerHeight - 16 ? box.bottom + 8 : Math.max(70, box.top - h - 8)
+    }
+    popEl.style.left = `${left}px`
+    popEl.style.top = `${top}px`
+  }
+  const agentAt = node => {
+    const host = node && node.closest ? node.closest('.c-card, .c-done') : null
+    return host ? host.dataset.id : null
+  }
+  /** The card whose explanation is open is described by it, for a screen reader. */
+  function describe(id) {
+    const host = id ? (cardViews.get(id) || doneViews.get(id) || {}).root : null
+    for (const node of document.querySelectorAll('[aria-describedby="pop"]')) node.removeAttribute('aria-describedby')
+    if (host) host.setAttribute('aria-describedby', 'pop')
+  }
+  /** Scrolls to an agent's card (or finished row), marks it, and opens its explanation. */
+  function showAgent(id, isPinned) {
+    const host = (cardViews.get(id) || doneViews.get(id) || {}).root
+    if (!host) return
+    host.scrollIntoView({ behavior: RM ? 'auto' : 'smooth', block: 'center' })
+    if (!RM) host.animate([{ boxShadow: '0 0 0 2px rgba(237,237,236,.5)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 900 })
+    if (isPinned) { pinned = id; describe(id); later(RM ? 0 : 420, () => drawCards(false)) }
+  }
+  const cvEl = $('cardsView')
+  cvEl.addEventListener('pointerover', event => {
+    if (event.target.closest('[data-tip], details, button')) return
+    const id = agentAt(event.target)
+    if (id && id !== hovered) { hovered = id; fillPop() }
+  })
+  cvEl.addEventListener('pointerout', event => {
+    const host = event.target.closest('.c-card, .c-done')
+    if (host && !host.contains(event.relatedTarget)) { hovered = null; fillPop() }
+  })
+  cvEl.addEventListener('focusin', event => {
+    const id = agentAt(event.target)
+    hovered = id
+    describe(id)
+    fillPop()
+  })
+  cvEl.addEventListener('focusout', () => { hovered = null; describe(pinned); fillPop() })
+  cvEl.addEventListener('click', event => {
+    if (event.target.closest('details, button')) return
+    const id = agentAt(event.target)
+    pinned = id && pinned !== id ? id : null
+    describe(pinned)
+    drawCards(false)
+  })
+  cvEl.addEventListener('keydown', event => {
+    const id = agentAt(document.activeElement)
+    if ((event.key === 'Enter' || event.key === ' ') && id && document.activeElement.matches('.c-card, .c-done')) {
+      event.preventDefault()
+      pinned = pinned === id ? null : id
+      describe(pinned)
+      drawCards(false)
+    }
+  })
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return
+    pinned = null
+    hovered = null
+    describe(null)
+    if (cardViews.size || doneViews.size) drawCards(false)
+    stipEl.classList.remove('on')
+  })
+  $('alertBtn').addEventListener('click', () => showAgent($('alertBtn').dataset.id, true))
+  cvEl.addEventListener('scroll', () => fillPop(), true)
+  addEventListener('resize', () => fillPop())
+
+  // Each symbol says what it means, for whoever opens this cold.
+  cvEl.addEventListener('pointerover', event => {
+    const host = event.target.closest('[data-tip]')
+    if (!host) return
+    const said = TIPS[host.dataset.tip]
+    stipEl.textContent = typeof said === 'function' ? said() : said || ''
+    stipEl.classList.add('on')
+  })
+  cvEl.addEventListener('pointermove', event => {
+    if (!stipEl.classList.contains('on')) return
+    stipEl.style.transform = `translate3d(${Math.min(event.clientX + 14, innerWidth - 320)}px,${Math.min(event.clientY + 16, innerHeight - 90)}px,0)`
+  })
+  cvEl.addEventListener('pointerout', event => {
+    const host = event.target.closest('[data-tip]')
+    if (host && !host.contains(event.relatedTarget)) stipEl.classList.remove('on')
+  })
+
+  // --- The tabs ---------------------------------------------------------------
+  function showView(next) {
+    if (next === view) return
+    view = next
+    const isCards = view === 'cards'
+    $('cardsView').hidden = !isCards
+    $('timelineView').hidden = isCards
+    document.body.classList.toggle('cards', isCards)
+    for (const [tab, on] of [[$('tabCards'), isCards], [$('tabTimeline'), !isCards]]) {
+      tab.setAttribute('aria-selected', String(on))
+      tab.tabIndex = on ? 0 : -1
+    }
+    if (isCards) drawCards(false)
+    else { popEl.className = 'c-pop'; stipEl.classList.remove('on'); lastScale = -1; kick() }
+  }
+  $('tabCards').addEventListener('click', () => showView('cards'))
+  $('tabTimeline').addEventListener('click', () => showView('timeline'))
+  $('tabCards').parentElement.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    const next = view === 'cards' ? 'timeline' : 'cards'
+    showView(next)
+    $(next === 'cards' ? 'tabCards' : 'tabTimeline').focus()
+  })
+
   // --- Floating: the window hands over to the island -------------------------
   const app = $('app'), frameEl = $('frame'), dock = $('dock')
   const morph = M.motionValue(0)
@@ -1031,12 +1700,14 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
     const main = el('span', 'isl-main', undefined, doc), time = el('span', 'isl-clock', undefined, doc)
     pill.append(mark, main, time)
     const list = el('div', 'isl-list', undefined, doc), foot = el('div', 'isl-foot', undefined, doc)
+    const team = el('p', 'isl-team', undefined, doc)
+    list.append(team)
     const sum = el('span', '', undefined, doc), open = el('button', 'isl-open', 'Open the full view ↗', doc)
     open.type = 'button'
     foot.append(sum, open)
     root.append(pill, list, foot)
     doc.body.append(root)
-    const built = { doc, win, root, pill, mark, main, time, list, sum, rows: new Map(), isOpen: false, said: '' }
+    const built = { doc, win, root, pill, mark, main, time, list, team, sum, rows: new Map(), isOpen: false, said: '' }
     // The browser lets a floating window change size only on a click.
     pill.addEventListener('click', () => {
       built.isOpen = !built.isOpen
@@ -1044,7 +1715,7 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
       pill.setAttribute('aria-expanded', String(built.isOpen))
       const rows = data ? data.agents.length : 0
       const chrome = win.outerHeight - win.innerHeight
-      try { win.resizeTo(win.outerWidth, chrome + (built.isOpen ? 64 + rows * 57 + 41 : 64)) } catch { /* the size stays; the list scrolls */ }
+      try { win.resizeTo(win.outerWidth, chrome + (built.isOpen ? 64 + 60 + rows * 57 + 41 : 64)) } catch { /* the size stays; the list scrolls */ }
     })
     open.addEventListener('click', () => { window.focus(); if (pip) pip.close() })
     return built
@@ -1054,18 +1725,24 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
     if (!island || !data) return
     const isl = island, doc = isl.doc, now = nowMs(), n = counts()
     const told = notice && notice.until > Date.now() ? data.agents.find(a => a.id === notice.id) : null
+    const health = new Map(data.agents.map(a => [a.id, healthOf(a, cardOf(a), now)]))
+    const stuck = [...health.values()].filter(h => h === 'stuck').length
     // When an agent finishes, the line says so for a moment, then goes back.
-    const line = told ? `${told.type} ${ENDED[told.state] || 'finished'}` : headline(n)
-    const tail = told ? ` · ${plural(told.tools, 'tool')}` : ''
+    // A stuck agent is said first: it is what needs the person.
+    const line = told ? `${told.type} ${ENDED[told.state] || 'finished'}` : stuck ? `${stuck} stuck` : headline(n)
+    const tail = told ? ` · ${plural(told.tools, 'tool')}` : stuck ? ` · ${n.run} running` : ''
     if (line + tail !== isl.said) {
       isl.said = line + tail
-      isl.main.textContent = told ? line : n.run > 0 ? `${n.run} running` : line
-      isl.main.append(el('i', '', told ? tail : n.run > 0 ? ` · ${n.done} done` : '', doc))
+      isl.main.textContent = told || stuck ? line : n.run > 0 ? `${n.run} running` : line
+      isl.main.append(el('i', '', told || stuck ? tail : n.run > 0 ? ` · ${n.done} done` : '', doc))
       isl.main.classList.remove('isl-swap')
       void isl.main.offsetWidth
       isl.main.classList.add('isl-swap')
     }
     isl.mark.dataset.s = told ? told.state : n.run > 0 ? 'running' : 'completed'
+    const team = data.cards && data.cards.team && data.cards.narrator && data.cards.narrator.state !== 'off' ? data.cards.team.text : ''
+    if (isl.team.textContent !== team) isl.team.textContent = team
+    isl.team.hidden = team === ''
     isl.time.textContent = clock(now - t0)
     isl.sum.textContent = `${plural(n.tools, 'tool')} · ${amount(n.tokens)} tokens`
     const held = new Set()
@@ -1080,14 +1757,17 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
         row = { node, mark, type, time, text }
         isl.rows.set(a.id, row)
       }
-      if (isl.list.children[i] !== row.node) isl.list.insertBefore(row.node, isl.list.children[i] || null)
+      // The team sentence sits first in the list; the rows follow it.
+      if (isl.list.children[i + 1] !== row.node) isl.list.insertBefore(row.node, isl.list.children[i + 1] || null)
       row.node.style.setProperty('--i', String(i))
       row.node.classList.toggle('live', isLive(a) && a.calls.some(c => c.end === undefined))
       row.node.classList.toggle('over', !isLive(a))
+      row.node.classList.toggle('stuck', health.get(a.id) === 'stuck')
       row.mark.dataset.s = a.state
       row.type.textContent = a.type
       row.time.textContent = clock((isLive(a) ? now : a.endedAt || a.seenAt || now) - a.startedAt)
-      const text = doing(a)
+      const card = cardOf(a)
+      const text = isLive(a) && isTold(card) ? card.told.now : doing(a)
       if (row.text.textContent !== text) row.text.textContent = text
     })
     for (const [id, row] of isl.rows) if (!held.has(id)) { row.node.remove(); isl.rows.delete(id) }
@@ -1104,9 +1784,10 @@ html.isl-doc, body.isl-body { height: 100%; background: var(--canvas); overflow:
   }
   $('float').addEventListener('click', floatOut)
   dock.addEventListener('click', () => { if (pip) pip.close() })
+  document.body.classList.add('cards')
   // The page opens in order: the name, the numbers, then the lanes.
   M.animate('.head .id', { opacity: [0, 1], y: [8, 0] }, SPRING)
-  M.animate('.metric, #float', { opacity: [0, 1], y: [10, 0] }, { ...SPRING, delay: M.stagger(0.05, { startDelay: 0.08 }) })
+  M.animate('.tabs, .metric, #float', { opacity: [0, 1], y: [10, 0] }, { ...SPRING, delay: M.stagger(0.05, { startDelay: 0.08 }) })
   M.animate('#detail', { opacity: [0, 1], y: [16, 0] }, { ...SPRING, delay: 0.22 })
   startPolling(window)
 })()
