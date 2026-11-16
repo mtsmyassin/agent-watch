@@ -261,3 +261,74 @@ with the vendored Motion 14.12.0, Python + Playwright gui-sim harness (outside t
 ## Calls made
 
 (Kept up to date while building; each is the conservative reading of an open point in the design.)
+
+1. **Same step = the same tool with the same arguments** (a short hash of the tool and its input, the engine's own
+   keys left out), not only the same `did` words: the words name a file but not which part was read or which pattern
+   was searched, so paging a long file, or two searches that read alike, would count as circles. A call stored before
+   this version falls back to its kind and words.
+2. A change to anything else between repeats ends a run (testing after each fix is work, not a circle), and a step
+   that fails is the failing sign's, not the circles' (one problem, one sign).
+3. Only calls with a kind of work count in the windows: bookkeeping (TodoWrite, Agent, ...) neither counts nor stands
+   between repeats.
+4. "Clears once 8 newer calls show none of it": a sign holds while its newest evidence call is among the agent's last
+   8 calls with a kind, judged as it stood when that call came. That keeps the 12-call circles window and the 8-call
+   clearing from contradicting each other.
+5. The outside check runs when the call starts, in the `tool.call` hook, on the full path; only the verdict and the
+   masked file name are kept (the full path is not stored even in the mod's state). It covers Edit, Write, MultiEdit,
+   NotebookEdit and any connected tool whose kind is edit and that names a file (`file_path`, `notebook_path`,
+   `path`). Relative paths resolve from the session folder; `\?\C:\...` and `/c/...` read as the drive; climbing past
+   a drive's root stays there; a share's `\server\share` is its root. With the folder unknown only the name is
+   judged. A change that came back failed or refused touched nothing; one still in flight counts. Shell commands that
+   write files are not seen (outside the design's "edit or write").
+6. `.env.example` counts as a secret name (the design's `.env*`, literally).
+7. Outside and secret names are one sign, `outside` ("touching what it should not"), with three wordings (outside,
+   may hold secrets, both); the newest such change is the evidence.
+8. Once an agent is over only `outside` stays (circles and failing describe how it works); its finished row keeps a
+   `Needs a check` mark and its banner line.
+9. Rules advice for failures in a row of different steps: "N steps failed in a row. Look at the error, or stop it and
+   fix the cause first." (the design's wording speaks of "the same step").
+10. The `trouble` moment ranks after `stuck` and before `recover`, stage and kind. A waiting `stuck` or `trouble` is
+    not pushed back by a stage or kind change (nor `trouble` by a recovery); its call covers those. A sign that clears
+    is no moment.
+11. Narrator advice shows only while it was written for the signs the agent shows now (trouble signs and `stuck`);
+    advice from before a sign, or for one that cleared, gives way to the rules' advice. The mod decides this
+    (`card.advice`), so the page has no stale-advice logic of its own.
+12. A reply without `progress` shows no estimate (no older one carried over): the rules have none. `percent` takes a
+    number or a text that is only a number (with an optional %), rounded and held to 0-100.
+13. The advice sanitizer drops advice holding a backtick, `$(`, `&&`, `||`, ` | `, a command-line flag, or a known
+    command after run/type/execute/enter/paste/use (git, npm, pip, python3, rm, ...). "No paths" is read as today's
+    cutting of folders to the file name, not dropping.
+14. On the page the trouble words are primary grey beside a crimson diamond, not crimson text: crimson on the card
+    surface is about 4.4:1, under AA for small text. The diamond (stuck keeps its round dot) lets the two read apart;
+    the chip reads "N in trouble". The banner lists at most 3 agents, then "N more need you".
+15. The explanation also gains `Progress (an estimate)` and `Trouble` sections beside `What to do` (the addendum
+    lists Progress among the fuller hover sections).
+16. Addendum, money guard: `$.session.authorize()` gives the credential kind the session really uses (bearer = a
+    claude.ai login; api-key, or none = pays); its handle is dropped at once. `$.session.identity()` answers only mods
+    that managed settings install, so it is not used. Then the cloud switches, the env keys' tails against
+    `customApiKeyResponses.approved`, and the config file's login. With nothing to go on it counts as paid (narrator
+    off) rather than spend money. The plan's name comes from `oauthAccount.organizationType` (`claude_max` -> "Max
+    plan"; unknown -> "Claude plan"); `CLAUDE_CONFIG_DIR` is honoured for the config file.
+17. Addendum, pauses: a pause is not "busy". With agents at work the beat goes on and the narrator asks again when
+    the pause ends; with none at work the waiting moments are told at the next activity, rather than beat for up to 5
+    minutes after everything ended. A failure landing during a pause does not stretch it; a success resets the steps.
+    The 400-call cap still stops it for the session (the addendum raised the cap, it did not remove it).
+18. Addendum, detail: "now" over 12 words is cut at 12 with "…"; what, how, progress, advice and found are held to
+    320 letters (about 40 words), next to 200, found to 3 findings split on ";".
+19. Addendum, truncation: requests ask for `effort: 'low'` and `MAX_TOKENS` 1024 (only what is used counts). A reply
+    whose `output_tokens` reach the cap, or the API's `max_output_tokens` error, is counted (`cut`) and shown in the
+    footer.
+20. Addendum, window: `autoOpenWindow` defaults to on and is read as on unless the option is false. Opened by itself
+    on Windows it goes through `gui/open-window.ps1` (PowerShell and Windows' own user32 calls): it hands the keyboard
+    back with AttachThreadInput + SetForegroundWindow and lifts the new window with SetWindowPos (topmost, then not)
+    without activating it; if that cannot run, the plain launch does. `/agent-watch gui` keeps the plain launch, since
+    the person asked to see the window. A script file, not an encoded command line: readable, and not the pattern
+    antivirus tools distrust. Residual: keystrokes in the few tens of milliseconds between Edge activating and the
+    hand-back can still land in the window.
+21. Keep Haiku 5.5 (the owner's call: fast and light on his Max limits).
+22. Live run: the repeating agent reads config.txt eight times, not five: with one narrator call per agent per 20 s, a
+    five-read agent finishes before its trouble call may go.
+23. Tests: new files per area (`trouble`, `insight-logic`, `insight-wiring`, `billing`, `always-on`, `detail`,
+    `auto-open`); each existing test changed by the design or the addendum is listed in its commit.
+24. gui-sim: "Unexpected string" joins the torn-read filter (one appeared on today's unchanged page under reduced
+    motion: a read of the data file mid-write).
