@@ -198,7 +198,7 @@ body.cards .metric { display: none; }
 .view[hidden] { display: none; }
 
 /* --- The cards: who is fine, who is stuck, what each is doing, in plain words.
-   Green working, amber slow, red stuck. Small text stays in the secondary grey:
+   Green working, amber slow, red stuck or in trouble. Small text stays in the secondary grey:
    the tertiary grey fails WCAG AA at 11-12 px. */
 :root { --crimson: #E5383B; --amber: #D4943A; --c-surface: #101113; --c-surface-2: #16171a; --c-surface-3: #1c1d21; --c-line: #48484A;
   --crimson-w: rgba(229, 56, 59, 0.08); --amber-w: rgba(212, 148, 58, 0.08); --emerald-w: rgba(13, 150, 104, 0.08); }
@@ -279,6 +279,30 @@ body.cards .metric { display: none; }
 .c-reason { margin-top: 8px; font: 400 12px/1.4 var(--sans); color: var(--text-secondary); }
 .c-card.stuck .c-reason { color: var(--crimson); }
 .c-reason:empty { display: none; }
+/* Trouble the rules found: the card turns red (border, tint, a dot); the words
+   stay in the primary grey, since crimson text fails AA at this size. */
+.c-card.trouble { border-left-color: var(--crimson); background: linear-gradient(90deg, var(--crimson-w), transparent 55%), var(--c-surface); }
+.c-trouble { display: flex; gap: 8px; align-items: baseline; margin: -2px 0 8px 32px; font: 400 13px/1.45 var(--sans); color: var(--text-primary); cursor: help; }
+.c-trouble[hidden] { display: none; }
+.c-trouble i { flex: none; width: 8px; height: 8px; border-radius: 1px; background: var(--crimson); transform: rotate(45deg) translateY(-1px); }
+.c-trouble b { flex: none; font-weight: 600; }
+/* Progress against the brief: the narrator's estimate, labeled as one. */
+.c-prog { margin-top: 10px; display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; align-items: center; cursor: help; }
+.c-prog[hidden] { display: none; }
+.c-ptxt { grid-column: 1 / -1; font: 400 13px/1.45 var(--sans); color: var(--text-secondary); }
+.c-pbar { height: 4px; position: relative; overflow: hidden; border-radius: 2px; background: var(--c-surface-3); }
+.c-pbar i { position: absolute; inset: 0; transform-origin: 0 50%; transform: scaleX(0); background: var(--accent-emerald); opacity: 0.8; transition: transform 0.8s var(--spring); }
+.c-pest { font: 400 11px/1.3 var(--sans); color: var(--text-secondary); }
+.c-tb.trouble .c-fill { background: rgba(229, 56, 59, 0.16); }
+.c-tb.trouble .c-lbl b { background: var(--crimson); border-radius: 1px; }
+.c-atxt { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.c-atxt .c-adv { color: var(--text-secondary); }
+.c-done.trouble { border-color: rgba(229, 56, 59, 0.45); }
+.c-dx { flex: none; display: inline-flex; gap: 6px; align-items: baseline; font: 600 12px/1.3 var(--sans); }
+.c-dx i { width: 7px; height: 7px; border-radius: 1px; background: var(--crimson); transform: rotate(45deg); }
+.c-dx[hidden] { display: none; }
+.c-pop.trouble { border-color: rgba(229, 56, 59, 0.5); }
+.c-pop .c-todo { color: var(--text-primary); }
 .c-found { margin-top: 10px; display: flex; gap: 8px; font: 400 13px/1.45 var(--sans); color: var(--text-secondary); }
 .c-found b { flex: none; padding-top: 2px; font: 500 11px/1.3 var(--sans); letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-secondary); }
 .c-nums { margin-top: 8px; font: 400 12px/1.4 var(--sans); color: var(--text-secondary); }
@@ -355,13 +379,13 @@ body.cards .metric { display: none; }
         <div class="c-chips" id="chips"></div>
         <div class="c-teambar" id="teambar" role="group" aria-label="Every agent at a glance"></div>
       </section>
-      <div class="c-alert" id="alert" role="status" hidden><span class="c-ic" aria-hidden="true">&#9888;</span><span id="alertTxt"></span><button class="c-btn" id="alertBtn" type="button">Show me</button></div>
+      <div class="c-alert" id="alert" role="status" hidden><span class="c-ic" aria-hidden="true">&#9888;</span><div class="c-atxt" id="alertTxt"></div><button class="c-btn" id="alertBtn" type="button">Show me</button></div>
       <div class="c-grid" id="cardGrid"></div>
       <p class="c-empty" id="cEmpty">No agents yet. Start some in Claude Code and they appear here.</p>
       <section class="c-donelist" id="doneList" aria-labelledby="doneHead" hidden><h2 id="doneHead">Finished</h2><ul id="doneRows"></ul></section>
     </div>
     <footer class="c-foot">
-      <span>Hover a card, or focus it, for what it is fixing and how. Click to keep it open; Esc closes. Green working, amber slow, red stuck.</span>
+      <span>Hover a card, or focus it, for what it is fixing and how. Click to keep it open; Esc closes. Green working, amber slow, red stuck or in trouble.</span>
       <span class="c-cost" id="narrLine"></span>
     </footer>
   </div>
@@ -1138,6 +1162,8 @@ body.cards .metric { display: none; }
   const KIND_WORD = { read: 'Reading', search: 'Searching', edit: 'Changing files', test: 'Testing', run: 'Running a command', write: 'Writing the report', wait: 'Waiting' }
   const HEALTH_WORD = { working: 'working', slow: 'slow', stuck: 'stuck', idle: 'resting', done: 'done' }
   const RANK = { stuck: 0, slow: 1, working: 2, idle: 3 }
+  /** Banner lines at most; the rest are counted. */
+  const ALERT_LINES = 3
   // Static outlines; no data goes into them.
   const ICONS = {
     read: '<path d="M3 5.5C5.5 4 8.5 4 11 5.5v13C8.5 17 5.5 17 3 18.5z M21 5.5C18.5 4 15.5 4 13 5.5v13c2.5-1.5 5.5-1.5 8 0z"/>',
@@ -1155,6 +1181,8 @@ body.cards .metric { display: none; }
     },
     strip: 'Stages: looking (reading and searching), changing (editing files), checking (running tests or checks), reporting (writing up what it did). It can go back a stage, for example when a test fails.',
     spark: 'Activity over the last minute: each rise is a step it took. A flat line means it has gone quiet.',
+    trouble: 'Trouble the rules found: going in circles (the same step 3 or more times in its last 12 steps), failing the same way (the same step failing 3 times, or 3 failures in a row), or a change outside this project or to a file that may hold secrets. It clears once 8 newer steps show none of it.',
+    prog: "The narrator's estimate of how much of what the agent was asked is done, judged from what it has done so far. An estimate, not a measurement.",
   }
   const cardGridEl = $('cardGrid'), doneRowsEl = $('doneRows'), teambarEl = $('teambar'), popEl = $('pop'), stipEl = $('stip')
   /** id → what the page keeps for one card, one finished row, one team-bar segment. */
@@ -1212,13 +1240,35 @@ body.cards .metric { display: none; }
     return quiet >= lim.stuckMs ? 'stuck' : quiet >= lim.slowMs ? 'slow' : 'working'
   }
   const narrator = () => (data && data.cards ? data.cards.narrator : null)
+  /** The trouble signs the mod's rules found for a card: each with its evidence and the rules' advice. */
+  function troubleOf(card) {
+    return Array.isArray(card.trouble) ? card.trouble.filter(t => t && typeof t.evidence === 'string' && typeof t.advice === 'string') : []
+  }
+  /** The estimate as a whole number 0-100, or null. */
+  function percentOf(told) {
+    const n = told && typeof told.percent === 'number' && Number.isFinite(told.percent) ? Math.round(told.percent) : null
+    return n === null ? null : Math.min(100, Math.max(0, n))
+  }
+  /**
+   * What the person can do: the narrator's advice while it is current, else
+   * the rules' for the first trouble sign, else today's words for a stuck agent.
+   */
+  function adviceFor(a, c, health, now) {
+    if (isTold(c) && typeof c.advice === 'string' && c.advice) return { text: c.advice, by: 'narrator' }
+    const trouble = troubleOf(c)
+    if (trouble.length) return { text: trouble[0].advice, by: 'rules' }
+    if (health === 'stuck') return { text: `It has had no new step for ${plainSpan(now - (c.quietSince || a.seenAt))}. If it stays stuck, stop it in Claude Code and give it a narrower task.`, by: 'rules' }
+    return null
+  }
+  /** True for an agent that needs the person: stuck, or with a trouble sign. */
+  const needsYou = (c, health) => health === 'stuck' || troubleOf(c).length > 0
   /** True when the card shows the narrator's words. */
   const isTold = card => !!card.told && (card.mode === 'told' || card.mode === 'writing')
   /** The plain-rules note: why the narrator's words are not shown. */
   function plainNote() {
     const n = narrator()
     if (!n) return 'Plain rules: the narrator is offline'
-    return n.state === 'off' ? 'Plain rules: the narrator is off' : 'Plain rules: the narrator is offline'
+    return n.state === 'off' ? 'Plain rules: the narrator is off' : n.state === 'paused' ? 'Plain rules: the narrator is paused' : 'Plain rules: the narrator is offline'
   }
   /** What a finished agent came to: the narrator's result once it is written, else its own answer. */
   function resultOf(a, card) {
@@ -1254,6 +1304,11 @@ body.cards .metric { display: none; }
     const doingRow = el('div', 'c-doing'), ico = el('span', 'c-ico'), now = el('p', 'c-now')
     doingRow.append(ico, now)
     const note = el('p', 'c-note')
+    const trouble = el('p', 'c-trouble'), tMark = el('i'), tLabel = el('b', '', 'Trouble:'), tText = el('span')
+    tMark.setAttribute('aria-hidden', 'true')
+    trouble.dataset.tip = 'trouble'
+    trouble.hidden = true
+    trouble.append(tMark, tLabel, tText)
     const row = el('div', 'c-row'), stageBox = el('div', 'c-stage'), strip = el('div', 'c-strip'), phases = el('div', 'c-phases')
     stageBox.dataset.tip = 'strip'
     stageBox.setAttribute('role', 'img')
@@ -1270,6 +1325,12 @@ body.cards .metric { display: none; }
     spark.dataset.tip = 'spark'
     spark.append(area, line)
     row.append(stageBox, spark)
+    const prog = el('div', 'c-prog'), ptxt = el('p', 'c-ptxt'), pbar = el('div', 'c-pbar'), pfill = el('i'), pest = el('span', 'c-pest')
+    prog.dataset.tip = 'prog'
+    prog.hidden = true
+    pbar.setAttribute('role', 'img')
+    pbar.append(pfill)
+    prog.append(ptxt, pbar, pest)
     const reason = el('p', 'c-reason')
     const found = el('p', 'c-found'), foundLabel = el('b', '', 'Found so far'), foundText = el('span')
     found.append(foundLabel, foundText)
@@ -1277,9 +1338,9 @@ body.cards .metric { display: none; }
     const n1 = el('span'), n2 = el('span'), n3 = el('span')
     numRow.append(n1, n2, n3)
     nums.append(summary, numRow)
-    root.append(head, doingRow, note, row, reason, found, nums)
+    root.append(head, doingRow, note, trouble, row, prog, reason, found, nums)
     cardGridEl.append(root)
-    const card = { id: a.id, root, name, type, time, health, hl, ico, now, note, stageBox, segs, labels, area, line, reason, foundLabel, foundText, n1, n2, n3, kind: '', state: '' }
+    const card = { id: a.id, root, name, type, time, health, hl, ico, now, note, trouble, tText, stageBox, segs, labels, area, line, prog, ptxt, pbar, pfill, pest, reason, foundLabel, foundText, n1, n2, n3, kind: '', state: '' }
     if (!isLoading && !RM) root.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.2,.8,.2,1)' })
     cardViews.set(a.id, card)
     return card
@@ -1287,7 +1348,8 @@ body.cards .metric { display: none; }
 
   function drawCard(card, a, c, health, now) {
     const told = isTold(c)
-    const state = `c-card ${health}${pinned === a.id ? ' pinned' : ''}`
+    const trouble = troubleOf(c)
+    const state = `c-card ${health}${trouble.length ? ' trouble' : ''}${pinned === a.id ? ' pinned' : ''}`
     if (card.root.className !== state) card.root.className = state
     put(card.name, nameOf(a))
     put(card.type, a.type)
@@ -1302,6 +1364,21 @@ body.cards .metric { display: none; }
     card.now.classList.toggle('tech', !told)
     put(card.note, c.mode === 'writing' ? 'Writing an update' : told ? '' : plainNote())
     card.note.classList.toggle('plain', !told && c.mode !== 'writing')
+    card.trouble.hidden = trouble.length === 0
+    put(card.tText, trouble.map(t => t.evidence).join(' · '))
+    // Progress is the narrator's estimate: shown only with its words, never made up by the rules.
+    const progress = told && typeof c.told.progress === 'string' && c.told.progress ? c.told : null
+    const pct = progress ? percentOf(progress) : null
+    card.prog.hidden = !progress
+    if (progress) {
+      put(card.ptxt, progress.progress)
+      card.pbar.hidden = pct === null
+      const scale = `scaleX(${pct === null ? 0 : pct / 100})`
+      if (card.pfill.style.transform !== scale) card.pfill.style.transform = scale
+      const barSaid = `Estimate: about ${pct}% done`
+      if (pct !== null && card.pbar.getAttribute('aria-label') !== barSaid) card.pbar.setAttribute('aria-label', barSaid)
+      put(card.pest, pct === null ? 'estimate' : `estimate · ${pct}%`)
+    }
     const at = Math.max(0, STAGES.indexOf(c.stage))
     card.segs.forEach((seg, i) => { seg.classList.toggle('past', i < at); seg.classList.toggle('cur', i === at) })
     card.labels.forEach((label, i) => label.classList.toggle('cur', i === at))
@@ -1317,7 +1394,7 @@ body.cards .metric { display: none; }
     put(card.n1, plural(a.tools, 'tool'))
     put(card.n2, `${amount(a.tokens)} tokens`)
     put(card.n3, `${clock(now - a.startedAt)} running`)
-    const said = `${nameOf(a)}, ${a.type}, ${HEALTH_WORD[health]}`
+    const said = `${nameOf(a)}, ${a.type}, ${HEALTH_WORD[health]}${trouble.length ? ', in trouble' : ''}`
     if (card.root.getAttribute('aria-label') !== said) card.root.setAttribute('aria-label', said)
   }
 
@@ -1325,25 +1402,31 @@ body.cards .metric { display: none; }
     const root = el('li', 'c-done')
     root.tabIndex = 0
     root.dataset.id = a.id
-    const ck = el('span', 'c-ck'), name = el('span', 'c-dn'), sum = el('span', 'c-ds'), time = el('span', 'c-dt')
+    const ck = el('span', 'c-ck'), name = el('span', 'c-dn'), dx = el('span', 'c-dx'), sum = el('span', 'c-ds'), time = el('span', 'c-dt')
+    const dxMark = el('i')
+    dxMark.setAttribute('aria-hidden', 'true')
+    dx.append(dxMark, el('span', '', 'Needs a check'))
+    dx.hidden = true
     ck.setAttribute('aria-hidden', 'true')
-    root.append(ck, name, sum, time)
+    root.append(ck, name, dx, sum, time)
     doneRowsEl.prepend(root)
     if (!isLoading && !RM) root.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 360 })
-    const row = { id: a.id, root, ck, name, sum, time }
+    const row = { id: a.id, root, ck, name, dx, sum, time }
     doneViews.set(a.id, row)
     return row
   }
 
   function drawDone(row, a, c) {
     const bad = a.state === 'failed' || a.state === 'killed'
-    const cls = `c-done${bad ? ' bad' : ''}${pinned === a.id ? ' pinned' : ''}`
+    const trouble = troubleOf(c)
+    row.dx.hidden = trouble.length === 0
+    const cls = `c-done${bad ? ' bad' : ''}${trouble.length ? ' trouble' : ''}${pinned === a.id ? ' pinned' : ''}`
     if (row.root.className !== cls) row.root.className = cls
     put(row.ck, a.state === 'failed' ? '✗' : a.state === 'killed' ? '■' : '✓')
     put(row.name, nameOf(a))
     put(row.sum, resultOf(a, c))
     put(row.time, plainSpan((a.endedAt || a.seenAt) - a.startedAt))
-    const said = `${nameOf(a)}, ${ENDED[a.state] || 'finished'}`
+    const said = `${nameOf(a)}, ${ENDED[a.state] || 'finished'}${trouble.length ? `, needs a check: ${trouble[0].evidence}` : ''}`
     if (row.root.getAttribute('aria-label') !== said) row.root.setAttribute('aria-label', said)
   }
 
@@ -1360,13 +1443,13 @@ body.cards .metric { display: none; }
       barViews.set(a.id, bar)
     }
     if (teambarEl.children[index] !== bar.root) teambarEl.insertBefore(bar.root, teambarEl.children[index] || null)
-    const cls = `c-tb ${health}`
+    const cls = `c-tb ${health}${troubleOf(c).length ? ' trouble' : ''}`
     if (bar.root.className !== cls) bar.root.className = cls
     put(bar.name, nameOf(a))
     const share = health === 'done' ? 1 : (Math.max(0, STAGES.indexOf(c.stage)) + 1) / 4
     const scale = `scaleX(${share})`
     if (bar.fill.style.transform !== scale) bar.fill.style.transform = scale
-    const said = `${nameOf(a)}: ${HEALTH_WORD[health]}, ${health === 'done' ? ENDED[a.state] || 'finished' : STAGE_WORD[c.stage] || c.stage}. Show its card.`
+    const said = `${nameOf(a)}: ${HEALTH_WORD[health]}${troubleOf(c).length ? ', in trouble' : ''}, ${health === 'done' ? ENDED[a.state] || 'finished' : STAGE_WORD[c.stage] || c.stage}. Show its card.`
     if (bar.root.getAttribute('aria-label') !== said) bar.root.setAttribute('aria-label', said)
   }
 
@@ -1391,12 +1474,13 @@ body.cards .metric { display: none; }
     if (IS_ISLAND || !data || view !== 'cards') return
     const now = nowMs()
     const list = data.agents
-    const counts = { working: 0, slow: 0, stuck: 0, idle: 0, done: 0 }
+    const counts = { working: 0, slow: 0, stuck: 0, trouble: 0, idle: 0, done: 0 }
     const live = [], over = []
     list.forEach((a, i) => {
       const c = cardOf(a)
       const health = healthOf(a, c, now)
       counts[health] += 1
+      if (troubleOf(c).length) counts.trouble += 1
       ;(health === 'done' ? over : live).push({ a, c, health, i })
     })
     // The team sentence: the narrator's, or the counts.
@@ -1410,32 +1494,49 @@ body.cards .metric { display: none; }
       put($('teamSrc'), 'The team (plain rules)')
     }
     // The count chips.
-    const chips = [['working', 'var(--accent-emerald)'], ['slow', 'var(--amber)'], ['stuck', 'var(--crimson)'], ['done', 'var(--c-line)']]
+    const chips = [['working', 'var(--accent-emerald)'], ['slow', 'var(--amber)'], ['stuck', 'var(--crimson)'], ['trouble', 'var(--crimson)'], ['done', 'var(--c-line)']]
     const chipsEl = $('chips')
     if (!chipsEl.children.length) {
-      for (const [, color] of chips) {
+      for (const [k, color] of chips) {
         const chip = el('span', 'c-chip'), dot = el('i'), text = el('span')
         dot.style.background = color
+        // Trouble's mark is a diamond, as on the card: a different sign from stuck's dot.
+        if (k === 'trouble') { dot.style.borderRadius = '1px'; dot.style.transform = 'rotate(45deg) scale(0.85)' }
         dot.setAttribute('aria-hidden', 'true')
         chip.append(dot, text)
         chipsEl.append(chip)
       }
     }
-    chips.forEach(([k], i) => put(chipsEl.children[i].lastChild, `${counts[k]} ${k === 'done' ? 'finished' : k}`))
+    chips.forEach(([k], i) => put(chipsEl.children[i].lastChild, `${counts[k]} ${k === 'done' ? 'finished' : k === 'trouble' ? 'in trouble' : k}`))
     // The team bar: live agents first, then the finished, one segment each.
     const seen = new Set()
     ;[...live, ...over].forEach(({ a, c, health }, index) => { seen.add(a.id); drawBar(a, c, health, index) })
     for (const [id, bar] of barViews) if (!seen.has(id)) { bar.root.remove(); barViews.delete(id) }
-    // The attention banner names who is stuck.
-    const stuck = live.filter(x => x.health === 'stuck')
+    // The cards of the live agents: whoever needs the person first, then slow, then the rest.
+    const rank = x => (needsYou(x.c, x.health) ? 0 : RANK[x.health])
+    const ranked = live.slice().sort((x, y) => rank(x) - rank(y) || x.i - y.i)
+    // The attention banner: who is stuck or in trouble, what is wrong, and what to do.
+    const needs = [...ranked.filter(x => needsYou(x.c, x.health)), ...over.filter(x => troubleOf(x.c).length)]
     const alertEl = $('alert')
-    alertEl.hidden = stuck.length === 0
-    if (stuck.length) {
-      put($('alertTxt'), `${stuck.map(x => `${nameOf(x.a)} has had no new step for ${plainSpan(now - (x.c.quietSince || x.a.seenAt))}.`).join(' ')} Hover it for what to do.`)
-      $('alertBtn').dataset.id = stuck[0].a.id
+    alertEl.hidden = needs.length === 0
+    if (needs.length) {
+      const lines = needs.slice(0, ALERT_LINES).map(({ a, c, health }) => {
+        const wrong = [
+          ...(health === 'stuck' ? [`no new step for ${plainSpan(now - (c.quietSince || a.seenAt))}`] : []),
+          ...troubleOf(c).map(t => t.evidence),
+        ].join('; ')
+        const advice = adviceFor(a, c, health, now)
+        const line = el('p'), who = el('b', '', `${nameOf(a)}: `)
+        line.append(who, document.createTextNode(`${wrong}.`))
+        if (advice) line.append(document.createTextNode(' '), el('span', 'c-adv', `What to do: ${advice.text}`))
+        return line
+      })
+      if (needs.length > ALERT_LINES) lines.push(el('p', 'c-adv', `${needs.length - ALERT_LINES} more need you: see their cards.`))
+      const box = $('alertTxt'), said = lines.map(line => line.textContent).join('\n')
+      if (box.dataset.said !== said) { box.dataset.said = said; box.replaceChildren(...lines) }
+      $('alertBtn').dataset.id = needs[0].a.id
     }
-    // The cards of the live agents.
-    const order = live.slice().sort((x, y) => RANK[x.health] - RANK[y.health] || x.i - y.i).map(({ a, c, health }) => {
+    const order = ranked.map(({ a, c, health }) => {
       const card = cardViews.get(a.id) || mountCard(a)
       drawCard(card, a, c, health, now)
       return card
@@ -1460,11 +1561,14 @@ body.cards .metric { display: none; }
   function costLine() {
     const n = narrator()
     if (!n) return 'Narrator: not in this version of the mod. Plain rules.'
-    if (n.state === 'off') return 'Narrator off in the options: plain rules, no model calls.'
+    // Off: the mod says why (the options, or a session that pays per call).
+    if (n.state === 'off') return n.why || 'Narrator off in the options: plain rules, no model calls.'
     const model = /haiku/i.test(n.model) ? 'Haiku' : n.model
-    const spent = `${n.calls} of ${n.limit} calls · ${amount(n.tokensIn + n.cacheRead + n.cacheWrite)} tokens in · ${amount(n.tokensOut)} out`
+    const plan = n.plan ? ` · on your ${n.plan}` : ''
+    const spent = `${n.calls} ${n.calls === 1 ? 'call' : 'calls'} · ${amount(n.tokensIn + n.cacheRead + n.cacheWrite)} tokens in · ${amount(n.tokensOut)} out`
     if (n.state === 'halted') return `Narrator stopped: ${n.why || 'it hit its limit'} ${spent}`
-    return `Narrator (${model}): ${spent}${n.inFlight ? ' · writing' : ''}${n.failed ? ` · ${n.failed} failed` : ''}`
+    if (n.state === 'paused') return `Narrator paused: ${n.why || 'it failed'} Trying again in ${plainSpan(Math.max(0, (n.until || 0) - Date.now()))}.${plan} · ${spent}`
+    return `Narrator (${model})${plan} · ${spent}${n.inFlight ? ' · writing' : ''}${n.failed ? ` · ${n.failed} failed` : ''}${n.cut ? ` · ${n.cut} cut off` : ''}`
   }
 
   // --- The explanation: hover, focus, or click to pin; Esc closes ---------------
@@ -1500,16 +1604,21 @@ body.cards .metric { display: none; }
       parts.push(section('Now', c.plain.now))
       if (c.plain.found) parts.push(section('Last step', c.plain.found, 'c-next'))
     }
-    if (health === 'stuck' && !told) {
-      parts.push(section('What to do', `It has had no new step for ${plainSpan(now - (c.quietSince || a.seenAt))}. If it stays stuck, stop it in Claude Code and give it a narrower task.`, 'c-next'))
+    if (told && typeof told.progress === 'string' && told.progress) {
+      const pct = percentOf(told)
+      parts.push(section('Progress (an estimate)', `${told.progress}${pct === null ? '' : ` · about ${pct}%`}`, 'c-next'))
     }
+    const trouble = troubleOf(c)
+    if (trouble.length) parts.push(section('Trouble', trouble.map(t => t.evidence).join('. ') + '.'))
+    const advice = adviceFor(a, c, health, now)
+    if (advice) parts.push(section('What to do', advice.text, 'c-todo'))
     if (!told && c.mode === 'plain' && c.why) parts.push(el('p', 'c-why', c.why))
     const meta = el('div', 'c-meta')
     meta.append(el('span', '', `${nameOf(a)}${pinned === id ? ' · pinned, Esc to close' : ''}`))
     meta.append(el('span', '', told ? `written ${ago(Date.now() - told.at)}` : c.mode === 'own' ? 'from its own answer' : 'plain rules'))
     parts.push(meta)
     popEl.replaceChildren(...parts)
-    popEl.className = `c-pop show${pinned === id ? ' pinned' : ''}${health === 'stuck' ? ' stuck' : ''}`
+    popEl.className = `c-pop show${pinned === id ? ' pinned' : ''}${health === 'stuck' ? ' stuck' : ''}${trouble.length ? ' trouble' : ''}`
     const box = anchor.getBoundingClientRect(), w = 360, h = popEl.offsetHeight
     let left = box.right + 10
     let top = Math.max(70, Math.min(box.top, innerHeight - h - 16))
@@ -1726,10 +1835,11 @@ body.cards .metric { display: none; }
     const isl = island, doc = isl.doc, now = nowMs(), n = counts()
     const told = notice && notice.until > Date.now() ? data.agents.find(a => a.id === notice.id) : null
     const health = new Map(data.agents.map(a => [a.id, healthOf(a, cardOf(a), now)]))
-    const stuck = [...health.values()].filter(h => h === 'stuck').length
+    const need = new Set(data.agents.filter(a => needsYou(cardOf(a), health.get(a.id))).map(a => a.id))
+    const stuck = need.size
     // When an agent finishes, the line says so for a moment, then goes back.
     // A stuck agent is said first: it is what needs the person.
-    const line = told ? `${told.type} ${ENDED[told.state] || 'finished'}` : stuck ? `${stuck} stuck` : headline(n)
+    const line = told ? `${told.type} ${ENDED[told.state] || 'finished'}` : stuck ? `${stuck} need${stuck === 1 ? 's' : ''} you` : headline(n)
     const tail = told ? ` · ${plural(told.tools, 'tool')}` : stuck ? ` · ${n.run} running` : ''
     if (line + tail !== isl.said) {
       isl.said = line + tail
@@ -1762,7 +1872,7 @@ body.cards .metric { display: none; }
       row.node.style.setProperty('--i', String(i))
       row.node.classList.toggle('live', isLive(a) && a.calls.some(c => c.end === undefined))
       row.node.classList.toggle('over', !isLive(a))
-      row.node.classList.toggle('stuck', health.get(a.id) === 'stuck')
+      row.node.classList.toggle('stuck', need.has(a.id))
       row.mark.dataset.s = a.state
       row.type.textContent = a.type
       row.time.textContent = clock((isLive(a) ? now : a.endedAt || a.seenAt || now) - a.startedAt)
