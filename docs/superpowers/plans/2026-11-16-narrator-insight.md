@@ -332,3 +332,13 @@ with the vendored Motion 14.12.0, Python + Playwright gui-sim harness (outside t
     `auto-open`); each existing test changed by the design or the addendum is listed in its commit.
 24. gui-sim: "Unexpected string" joins the torn-read filter (one appeared on today's unchanged page under reduced
     motion: a read of the data file mid-write).
+25. From the live runs' check of every narrator line against the real calls: a call's result now keeps its line
+    breaks as ` | ` for the narrator (a Grep's matches had run together: "fruit.txt line 1 has 'mango notes'"), and
+    the system prompt says counts come from the tally (it had said "eight steps" when ten were done, counting the
+    newest steps shown). One more unsupported line, "about six rounds more than asked" for 22 reads of 16, is the
+    model's arithmetic and has no code fix.
+26. The opener hands the keyboard back from any new Edge window that takes the foreground, not only once the page's
+    title has loaded (run 1 measured about 0.2 s on the new window). Run 2, with that change, still measured about
+    0.1-0.2 s at the watcher's ~120 ms resolution: the PowerShell loop's own cost is the floor. Left as is and said.
+27. A third live run repeats the second on the final code, to see the two grounding fixes and the narrator's advice
+    on a card in trouble live.
