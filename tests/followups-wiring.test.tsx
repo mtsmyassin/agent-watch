@@ -124,3 +124,27 @@ test('an agent going in circles is asked about at once, before its 20 s are up',
   expect(dataOf(r).cards?.agents.a1?.trouble?.map(one => one.sign)).toContain('failing')
   expect(r.asked.length).toBe(2)
 })
+
+test('a narrator reply that miscounts reaches the page corrected, and the debug log says so', async ($, on) => {
+  const r = rig(on)
+  const clock = mock.clock(on)
+
+  r.reply = {
+    isAnswered: true,
+    text: JSON.stringify({ ...STORY, progress: 'It has read config.txt 9 times of the 8 asked', percent: 100 }),
+    usage: USED,
+  }
+  await $.session.start(SESSION)
+  await $.agent.spawn(SPAWN)
+  await clock.settle()
+  await $.command.run(ASK_GUI)
+  await $.tool.call({ tool: 'Read', file_path: 'C:\work\shop\config.txt', agentId: 'a1' })
+  await clock.advance(2000)
+
+  const cards = dataOf(r).cards
+
+  expect(cards?.agents.a1?.told?.progress).toBe('Counted from its steps: 1 read; 0 failed.')
+  expect(cards?.agents.a1?.told?.percent).toBeUndefined()
+  expect(cards?.narrator.corrected).toBe(1)
+  expect(r.logged.some(line => line.includes('narrator count corrected (1 this session)') && line.includes('the tally has 1'))).toBe(true)
+})

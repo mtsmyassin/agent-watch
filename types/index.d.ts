@@ -156,6 +156,8 @@ export type Story = {
    * or stuck may skip it once); the next call that waits the gap clears it.
    */
   rushed?: true
+  /** What the last words told had wrong against the tally, and what stood in; absent when they held. */
+  corrected?: string
 }
 
 /** The narrator's account for the session: its calls, its cost, and the team sentence. */
@@ -180,6 +182,8 @@ export type Ledger = {
   pauseWhy?: string
   /** Replies that ran into the token cap and lost their end. */
   cut?: number
+  /** Fields the narrator miscounted, replaced by the rules' words. */
+  miscounts?: number
   team?: { text: string; at: number }
   teamPending?: true
   /** When the last moment worth a team sentence came. */
@@ -225,6 +229,8 @@ export type Cards = {
     until?: number
     /** Replies cut off at the token cap this session, when any were. */
     cut?: number
+    /** Fields that miscounted against the tally this session and were replaced, when any were. */
+    corrected?: number
     model: string
     calls: number
     limit: number

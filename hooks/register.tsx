@@ -733,7 +733,19 @@ function speak($: EngineInterface, ask: Ask): void {
           debug($, 'narrator gave no words', `${reply.reason}${reply.error === undefined ? '' : ` ${reply.error}`}`)
         }
 
-        await update($, narration, held => landed(held, ask, reply, clock()))
+        let before = 0
+        const after = await update($, narration, held => {
+          before = held.ledger.miscounts ?? 0
+
+          return landed(held, ask, reply, clock())
+        })
+        const miscounts = after.ledger.miscounts ?? 0
+
+        // A reply that miscounted against the tally was corrected: said in the debug log.
+        if (ask.to === 'agent' && miscounts > before) {
+          debug($, `narrator count corrected (${miscounts} this session)`, after.stories[ask.id]?.corrected ?? '')
+        }
+
         refresh($)
         narrate($)
       }),

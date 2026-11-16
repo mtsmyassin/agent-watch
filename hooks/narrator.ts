@@ -24,7 +24,8 @@ import { healthOf, kindNow, plainOf, SLOW_MS, stageOf, steadyKind, STUCK_MS } fr
 import { brief, clip, isLive, redact, span, typeName, unpathed } from './roster'
 import type { Trails } from './trail'
 import type { Access } from './billing'
-import { tallyOf, times } from './counts'
+import { corrected, KIND_COUNTS, tallyOf, times } from './counts'
+import type { Tally } from './counts'
 import { troubleOf } from './trouble'
 
 /** The small model that writes the cards. */
@@ -116,7 +117,16 @@ export type Request = {
 
 /** A call to make: for one agent's card at a moment, or for the team sentence. */
 export type Ask =
-  | { to: 'agent'; id: string; moment: Moment; request: Request }
+  | {
+      to: 'agent'
+      id: string
+      moment: Moment
+      request: Request
+      /** The counts the prompt gave: the reply's counts are checked against these. */
+      tally?: Tally
+      /** The rules' "found" when the call went out: what stands in for a found that miscounts. */
+      found?: string
+    }
   | { to: 'team'; request: Request }
 
 /** Nothing told, nothing spent. */
@@ -375,11 +385,15 @@ export function planned(
       } else {
         story.askedFor = key
       }
+      const trail = own(trails, next.id)
+
       asks.push({
         to: 'agent',
         id: next.id,
         moment,
-        request: requestOf(AGENT_SYSTEM, agentPrompt(next, own(trails, next.id), story, moment, now)),
+        request: requestOf(AGENT_SYSTEM, agentPrompt(next, trail, story, moment, now)),
+        tally: tallyOf(trail),
+        found: plainOf(next, trail, now).found,
       })
     }
 
@@ -579,16 +593,6 @@ const SIGN_WORDS: Readonly<Record<Sign, string>> = {
 /** Each sign's evidence, said with what sign it is. */
 const evidenced = (trouble: readonly Trouble[]): string =>
   trouble.map(one => `${safe(one.evidence, 160)} (${SIGN_WORDS[one.sign]})`).join('; ')
-
-/** Each kind of work as the tally counts it: one, and many. */
-const KIND_COUNTS: readonly (readonly [Kind, string, string])[] = [
-  ['read', 'read', 'reads'],
-  ['search', 'search', 'searches'],
-  ['edit', 'edit', 'edits'],
-  ['test', 'test or check run', 'test or check runs'],
-  ['run', 'other command', 'other commands'],
-  ['write', 'report', 'reports'],
-]
 
 /**
  * The whole trail in short, counted by the mod so the narrator never has
@@ -985,8 +989,21 @@ export function landed(held: Narration, ask: Ask, reply: Reply, now: number): Na
       ledger.team = { text: sentence, at: now }
     }
   } else {
-    const fields = reply.isAnswered ? parsed(reply.text) : undefined
+    let fields = reply.isAnswered ? parsed(reply.text) : undefined
     const was = own(stories, ask.id)
+    let wrong: string[] = []
+
+    // The mod counted; a field whose counts contradict that is replaced by the rules' words.
+    if (fields !== undefined && ask.tally !== undefined) {
+      const checked = corrected(fields, ask.tally, ask.found ?? '')
+
+      fields = checked.told
+      wrong = checked.wrong
+
+      if (wrong.length > 0) {
+        ledger.miscounts = (ledger.miscounts ?? 0) + wrong.length
+      }
+    }
 
     isOk = fields !== undefined
 
@@ -997,6 +1014,12 @@ export function landed(held: Narration, ask: Ask, reply: Reply, now: number): Na
         story.failed = whyFailed(reply)
       } else {
         delete story.failed
+
+        if (wrong.length > 0) {
+          story.corrected = wrong.join('; ')
+        } else {
+          delete story.corrected
+        }
 
         // The advice holds for the signs this call was asked with.
         if (askedFor === undefined) {
@@ -1237,6 +1260,10 @@ export function cardsOf(
 
   if (ledger.cut !== undefined && ledger.cut > 0) {
     narrator.cut = ledger.cut
+  }
+
+  if (ledger.miscounts !== undefined && ledger.miscounts > 0) {
+    narrator.corrected = ledger.miscounts
   }
 
   const cards: Cards = {
