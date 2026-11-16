@@ -66,6 +66,11 @@ export type Call = {
   isFailed?: true
   /** The kind of work it is; absent for bookkeeping, which keeps the kind there was. */
   kind?: Kind
+  /**
+   * The opening of what it answered, cut and masked: for the narrator alone,
+   * never written to the page's data.
+   */
+  out?: string
 }
 
 /** What one agent did, call by call, and the longer result it ended with. */
@@ -76,6 +81,8 @@ export type Trail = {
   dropped: number
   /** Its answer in about 600 letters: folder paths cut, already redacted. */
   result?: string
+  /** The brief it was started with, cut and masked: for the narrator alone. */
+  ask?: string
 }
 
 /**

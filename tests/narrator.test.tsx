@@ -12,6 +12,7 @@ import {
   STUCK_MS,
 } from '../hooks/infer'
 import { born } from '../hooks/roster'
+import { asked, began, called, finished, kept, payload } from '../hooks/trail'
 import type { AgentRow, Call, Kind, Trail } from '../types'
 
 const T = 1_800_000_000_000
@@ -178,4 +179,39 @@ test("a call's result is cut short and masked before anyone reads it", () => {
   expect(out).not.toContain(secret)
   expect(out).not.toContain('Users')
   expect(outOf('')).toBe('')
+})
+
+// --- The trail: what the narrator reads, and what the page never gets -------
+
+test('a call keeps its kind and its short result, and the page never gets the result', () => {
+  const call = called('k1', 'Running pytest -x', T, 'test')
+
+  expect(call).toEqual({ key: 'k1', doing: 'Running pytest -x', did: 'Ran pytest -x', at: T, kind: 'test' })
+  // Bookkeeping has no kind, and no key for one.
+  expect(Object.keys(called('k2', 'Updating the task list', T))).not.toContain('kind')
+
+  const trails = finished(began({}, 'a1', call), 'a1', 'k1', T + 900, true, '3 failed, 9 passed')
+
+  expect(trails.a1?.calls[0]).toEqual({ ...call, end: T + 900, isFailed: true, out: '3 failed, 9 passed' })
+  // With no result to keep, none is noted.
+  expect(Object.keys(finished(began({}, 'a1', call), 'a1', 'k1', T + 900, false).a1?.calls[0] ?? {})).not.toContain('out')
+
+  const data = payload({ id: 'abc123', cwd: '/w' }, [born('a1', T)], trails, T + 1000)
+
+  expect(data.agents[0]?.calls).toEqual([{ ...call, end: T + 900, isFailed: true }])
+})
+
+test('the brief an agent was given is kept with its trail, and goes with it', () => {
+  const trails = asked({}, 'a1', 'Find where login is handled.')
+
+  expect(trails.a1).toEqual({ calls: [], dropped: 0, ask: 'Find where login is handled.' })
+
+  const more = began(trails, 'a1', called('k1', 'Reading a.py', T, 'read'))
+
+  expect(more.a1?.ask).toBe('Find where login is handled.')
+  // An empty brief changes nothing.
+  expect(asked(more, 'a1', '')).toBe(more)
+  expect(kept(more, [])).toEqual({})
+  // The brief is for the narrator alone.
+  expect(JSON.stringify(payload({ id: 'abc123', cwd: '/w' }, [born('a1', T)], more, T))).not.toContain('login')
 })
