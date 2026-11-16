@@ -38,6 +38,18 @@ export type AgentRow = {
   answer?: string
 }
 
+/**
+ * The kind of work a call is: what the card's icon shows. `wait` is the
+ * page's own word for an agent gone slow or stuck, and no call is one.
+ */
+export type Kind = 'read' | 'search' | 'edit' | 'test' | 'run' | 'write'
+
+/** Where an agent is in its job; it can go back a stage. */
+export type Stage = 'looking' | 'changing' | 'checking' | 'reporting'
+
+/** How an agent is doing: green, amber, red, resting, or over. */
+export type Health = 'working' | 'slow' | 'stuck' | 'idle' | 'done'
+
 /** One tool call of an agent, as its trail keeps it; the words are already redacted. */
 export type Call = {
   /** The call's own id: what its end is matched to. */
@@ -52,6 +64,8 @@ export type Call = {
   end?: number
   /** Set when it threw, answered an error or was refused. */
   isFailed?: true
+  /** The kind of work it is; absent for bookkeeping, which keeps the kind there was. */
+  kind?: Kind
 }
 
 /** What one agent did, call by call, and the longer result it ended with. */
