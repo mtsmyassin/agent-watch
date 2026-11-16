@@ -85,6 +85,107 @@ export type Trail = {
   ask?: string
 }
 
+/** A moment the narrator writes at. */
+export type Moment = 'start' | 'stage' | 'kind' | 'stuck' | 'recover' | 'finish'
+
+/** What the narrator wrote for one agent, cleaned and capped, and when it landed. */
+export type Told = {
+  /** What it is trying to fix or answer; written once, at the start. */
+  what?: string
+  /** What it is doing right now, in plain words. */
+  now: string
+  /** What it has found or changed so far. */
+  found?: string
+  /** How it is going about it; once it is over, its result. */
+  how: string
+  /** What it will most likely do next; once over, what is left for the person. */
+  next?: string
+  at: number
+}
+
+/** What the narrator last took note of for an agent: a change in it is a moment. */
+export type Seen = { stage: Stage; kind?: Kind; health: Health }
+
+/** One agent's narration: what was written, what was seen, what waits to be asked. */
+export type Story = {
+  seen: Seen
+  told?: Told
+  /** The moment waiting for its turn under the budget. */
+  pending?: Moment
+  /** The moment a call is out for now. */
+  asking?: Moment
+  /** When the last call for this agent went out. */
+  askedAt?: number
+  /** Why the last call gave nothing usable, in plain words; the rules show meanwhile. */
+  failed?: string
+  /** Set for an agent already over when first seen: it is never narrated. */
+  isOwn?: true
+}
+
+/** The narrator's account for the session: its calls, its cost, and the team sentence. */
+export type Ledger = {
+  /** Calls started this session, failed ones included. */
+  calls: number
+  inFlight: number
+  failed: number
+  /** Failures since the last call that worked. */
+  inARow: number
+  tokensIn: number
+  tokensOut: number
+  cacheRead: number
+  cacheWrite: number
+  /** Why the narrator stopped for the session (its budget, or a refusal that will not clear). */
+  halt?: string
+  team?: { text: string; at: number }
+  teamPending?: true
+  /** When the last moment worth a team sentence came. */
+  teamEventAt?: number
+  /** When the last team call went out. */
+  teamAt?: number
+  isTeamAsking?: true
+}
+
+/** The narrator's whole state: a story per agent, and the ledger. */
+export type Narration = { stories: Record<string, Story>; ledger: Ledger }
+
+/** One agent's card as the page draws it. */
+export type Card = {
+  stage: Stage
+  kind?: Kind
+  /** When the agent last took a step: the page times its health light from here. */
+  quietSince: number
+  /** The rules-only words: what it does now, and its last step or its answer. */
+  plain: { now: string; found: string }
+  told?: Told
+  /**
+   * Which words the card shows: the narrator's (`told`), the narrator's last
+   * while it writes an update (`writing`), the rules (`plain`, with `why`), or
+   * for an agent over before the narrator saw it, its own answer (`own`).
+   */
+  mode: 'told' | 'writing' | 'plain' | 'own'
+  why?: string
+}
+
+/** Everything the cards need beyond the rows: written beside `agents` in the data file. */
+export type Cards = {
+  narrator: {
+    state: 'on' | 'off' | 'halted'
+    why?: string
+    model: string
+    calls: number
+    limit: number
+    inFlight: number
+    failed: number
+    tokensIn: number
+    tokensOut: number
+    cacheRead: number
+    cacheWrite: number
+  }
+  limits: { slowMs: number; stuckMs: number }
+  team?: { text: string; at: number }
+  agents: Record<string, Card>
+}
+
 /**
  * What the window's page reads: the data file's one value. The page is a
  * local file and cannot ask the mod anything, so all it shows is in here.
@@ -122,6 +223,8 @@ export type Payload = {
     dropped: number
     calls: Call[]
   }>
+  /** The cards' words and the narrator's account; absent from an older mod. */
+  cards?: Cards
 }
 
 declare module 'claude-code' {
@@ -133,6 +236,8 @@ declare module 'claude-code' {
       trail: Shaped<Record<string, Trail>>
       /** The window's page: the name its files go by, and whether it is fed. */
       gui: { sid: string; isOn: boolean }
+      /** The narrator's stories and its account for the session. */
+      narration: Shaped<Narration>
     }
   }
 }
