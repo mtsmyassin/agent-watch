@@ -44,6 +44,11 @@ export const NAMES_MAX = 12
 export const TIMEOUT_MS = 15_000
 /** At most one call per agent in this long. */
 export const AGENT_GAP_MS = 20_000
+/**
+ * While an agent is in trouble or stuck its card is written again this
+ * often, so its counts stay current; never sooner than the per-agent gap.
+ */
+export const REFRESH_MS = 30_000
 /** At most one team sentence in this long. */
 export const TEAM_GAP_MS = 30_000
 /** The team sentence waits this long after the news, so one call covers a burst. */
@@ -196,6 +201,19 @@ function merged(waiting: Moment | undefined, next: Moment): Moment {
 const TEAM_NEWS: ReadonlySet<Moment> = new Set(['start', 'finish', 'stuck', 'trouble', 'recover'])
 /** The moments asked about before anything else. */
 const URGENT: ReadonlySet<Moment> = new Set(['finish', 'stuck', 'trouble'])
+/** The moments that may skip the per-agent wait, once, so their advice lands while the trouble is live. */
+const RUSHED: ReadonlySet<Moment> = new Set(['stuck', 'trouble'])
+
+/** True for an agent at work that is in trouble or stuck: its card is refreshed while it lasts. */
+const isTroubled = (row: AgentRow, seen: Seen): boolean =>
+  isLive(row) &&
+  seen.health !== 'idle' &&
+  seen.health !== 'done' &&
+  (seen.health === 'stuck' || (seen.trouble ?? []).length > 0)
+
+/** True while the per-agent wait since the last call is not up. */
+const isWithinGap = (story: Story, now: number): boolean =>
+  story.askedAt !== undefined && now - story.askedAt < AGENT_GAP_MS
 
 /**
  * The signs an agent shows, as one key: its trouble signs and `stuck`. Advice
@@ -279,6 +297,19 @@ export function planned(
       }
     }
 
+    // In trouble or stuck, with nothing else to tell: the card is written
+    // again every 30 s, so its counts do not go stale while it lasts.
+    if (
+      story.pending === undefined &&
+      story.asking === undefined &&
+      story.isOwn !== true &&
+      story.askedAt !== undefined &&
+      now - story.askedAt >= REFRESH_MS &&
+      isTroubled(row, seen)
+    ) {
+      story.pending = 'refresh'
+    }
+
     stories[row.id] = story
   }
 
@@ -295,7 +326,8 @@ export function planned(
       return false
     }
 
-    if (story.askedAt !== undefined && now - story.askedAt < AGENT_GAP_MS) {
+    // Trouble and stuck may skip the wait, but not twice in a row.
+    if (isWithinGap(story, now) && !(RUSHED.has(story.pending) && story.rushed !== true)) {
       return false
     }
 
@@ -326,6 +358,12 @@ export function planned(
       const story = stories[next.id] as Story
       const moment = story.pending as Moment
       const key = signsKey(story.seen.trouble ?? [], story.seen.health)
+
+      if (isWithinGap(story, now)) {
+        story.rushed = true
+      } else {
+        delete story.rushed
+      }
 
       delete story.pending
       story.asking = moment
@@ -506,6 +544,10 @@ function momentWords(moment: Moment, row: AgentRow, seen: Seen, now: number): st
       return 'It is taking steps again after it looked stuck.'
     case 'finish':
       return 'It has finished.'
+    case 'refresh':
+      return seen.health === 'stuck'
+        ? `It still looks stuck: no new step for ${span(now - row.seenAt)}. Bring the card up to date.`
+        : 'It is still in trouble (see "Trouble the rules found"). Bring the card up to date with its newest steps and the tally.'
   }
 }
 

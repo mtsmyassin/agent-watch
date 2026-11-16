@@ -107,7 +107,7 @@ export type Trail = {
 }
 
 /** A moment the narrator writes at. */
-export type Moment = 'start' | 'stage' | 'kind' | 'stuck' | 'trouble' | 'recover' | 'finish'
+export type Moment = 'start' | 'stage' | 'kind' | 'stuck' | 'trouble' | 'recover' | 'finish' | 'refresh'
 
 /** What the narrator wrote for one agent, cleaned and capped, and when it landed. */
 export type Told = {
@@ -151,6 +151,11 @@ export type Story = {
   askedFor?: string
   /** The same for the words told: their advice holds only while the signs are still these. */
   toldFor?: string
+  /**
+   * Set when the last call went out before the per-agent gap was up (trouble
+   * or stuck may skip it once); the next call that waits the gap clears it.
+   */
+  rushed?: true
 }
 
 /** The narrator's account for the session: its calls, its cost, and the team sentence. */

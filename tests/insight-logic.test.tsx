@@ -76,7 +76,8 @@ test('a new trouble sign is a moment, urgent and team news', () => {
   expect(plan.narration.ledger.teamPending).toBe(true)
 
   // A waiting trouble is not replaced by a stage change: its call covers what came since.
-  const waiting = holding({ a2: { seen: { ...READING, trouble: ['circles'] }, pending: 'trouble', askedAt: T } })
+  // (Its one skip of the wait is spent, so it waits: the rule under test is the merge.)
+  const waiting = holding({ a2: { seen: { ...READING, trouble: ['circles'] }, pending: 'trouble', askedAt: T, rushed: true } })
   const edited = { a2: trailOf(...(trails.a2.calls), c('edit', 'Edited x.py')) }
 
   expect(planned(waiting, [live('a2')], edited, T + 5000).narration.stories.a2?.pending).toBe('trouble')
@@ -201,9 +202,14 @@ test('advice written before the trouble is not shown with it', () => {
   expect(calmCard?.told?.percent).toBe(5)
   expect(calmCard?.trouble).toBeUndefined()
 
-  // It goes in circles inside its 20 s: the trouble waits its turn, the old advice is not shown with it.
+  // It goes in circles inside its 20 s. With its one skip of the wait free, the trouble is asked at once...
   const loop = { a1: trailOf(...calm.a1.calls, config(), config(), config()) }
-  const later = planned(told, rows, loop, T + 3000)
+
+  expect(agentAsks(planned(told, rows, loop, T + 3000).asks)).toEqual(['a1:trouble'])
+
+  // ...with the skip spent, it waits its turn, and the old advice is not shown with it.
+  const spent: Narration = { ...told, stories: { a1: { ...(told.stories.a1 as Story), rushed: true } } }
+  const later = planned(spent, rows, loop, T + 3000)
   const waiting = cardsOf(rows, loop, later.narration, T + 3000, true).agents.a1
 
   expect(later.asks).toEqual([])
