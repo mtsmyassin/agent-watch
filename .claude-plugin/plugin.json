@@ -9,6 +9,12 @@
       "title": "Open the agents window by itself",
       "description": "Opens the agents window in a browser the first time two or more agents are working in a session. Off, the window opens only when you type /agent-watch gui.",
       "default": false
+    },
+    "narrator": {
+      "type": "boolean",
+      "title": "Plain-words narrator in the agents window",
+      "description": "While the agents window is open, a small model (Haiku) writes each agent's card in plain words at the moments that matter: at most one call per agent per 20 s and 80 calls a session, its cost shown at the foot of the window. Off, the cards use plain rules and no model is called.",
+      "default": true
     }
   }
 }

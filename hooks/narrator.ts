@@ -652,6 +652,8 @@ function whyFailed(reply: Reply): string {
       return `The narrator gave no answer within ${TIMEOUT_MS / 1000} s, so these are the plain rules.`
     case 'empty-reply':
       return 'The narrator answered with no words, so these are the plain rules.'
+    case 'refused':
+      return "The engine would not send the narrator's call, so these are the plain rules."
     case 'api-error': {
       const status = typeof reply.status === 'number' ? `, ${reply.status}` : ''
 
@@ -724,7 +726,10 @@ export function landed(held: Narration, ask: Ask, reply: Reply, now: number): Na
     if (ledger.halt === undefined) {
       const error = !reply.isAnswered && reply.reason === 'api-error' ? (reply.error ?? '') : ''
 
-      if (FATAL.has(error)) {
+      if (!reply.isAnswered && reply.reason === 'refused') {
+        // The engine refuses to send only what it will refuse again: a blocked model, a bad cap.
+        ledger.halt = 'The engine would not send the narrator\'s call, so it stopped for this session and the cards use the plain rules.'
+      } else if (FATAL.has(error)) {
         ledger.halt = `The narrator was refused (${error}) and stopped for this session, so the cards use the plain rules.`
       } else if (ledger.inARow >= FAILS_IN_A_ROW) {
         ledger.halt = 'The narrator failed three times in a row and stopped for this session, so the cards use the plain rules.'
@@ -765,7 +770,8 @@ function cardOf(
     card.told = story.told
   }
 
-  if (story?.isOwn === true) {
+  // Over before the narrator saw it (or before it planned at all): its own answer.
+  if (story?.isOwn === true || (story === undefined && !isLive(row))) {
     card.mode = 'own'
 
     return card

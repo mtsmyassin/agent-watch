@@ -2,6 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentRow } from '../types'
+import { kindOf, outOf } from './infer'
+import { cardsOf, EMPTY, isBusy as isNarrating, landed, planned, restarted } from './narrator'
+import type { Ask, Reply } from './narrator'
 import {
   acted,
   born,
@@ -23,6 +26,7 @@ import {
 } from './roster'
 import type { Span, Tone } from './roster'
 import {
+  asked,
   began,
   called,
   dataFile,
@@ -113,6 +117,20 @@ const gui = atom({ plugin: 'agent-watch', key: 'gui' } as const, {
   sid: '',
   isOn: false,
 })
+// What the narrator wrote and what it has spent, kept across a reload so the
+// session's budget holds.
+const narration = atom({ plugin: 'agent-watch', key: 'narration' } as const, EMPTY, {
+  shape: 'narration-1',
+})
+/** A model call that cost nothing: what a call the engine refused to send is counted as. */
+const NO_COST = {
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_input_tokens: 0,
+  cache_creation_input_tokens: 0,
+} as const
+/** How much of an agent's brief the narrator may read, masked. */
+const ASK_MAX = 400
 
 const clock = (): number => Date.now()
 
@@ -170,6 +188,13 @@ let hasAutoOpened = false
 let isWriteQueued = false
 /** Numbers the calls that carry no id of their own. */
 let serial = 0
+/**
+ * True where the options leave the narrator on (the default). It writes only
+ * while the window is fed: the pane has nowhere to show its words.
+ */
+let isNarratorOn = true
+/** True while a narrator plan waits its turn: a burst of changes shares it. */
+let isPlanQueued = false
 
 function debug($: EngineInterface, what: string, error: unknown): void {
   $.ui.log(`${NAME}: ${what}: ${String(error)}`, { to: 'debug' })
@@ -267,11 +292,17 @@ async function tick($: EngineInterface, beat: number): Promise<void> {
       : await read($, agents)
   // While an agent lives the window's page gets a fresh beat, however little
   // changes: a beat that stands still means the session is gone, not slow.
-  const isBeating = isGuiOn && list.some(isLive)
+  // A narrator with a call out or a moment waiting keeps it going too.
+  const isBeating =
+    isGuiOn && (list.some(isLive) || (isNarratorOn && isNarrating(await read($, narration))))
 
   if (isBeating && beat % BEAT_TICKS === 0) {
     refresh($)
   }
+
+  // Health turns amber and red by the clock alone, and a moment waits out its
+  // 20 s: the narrator looks again every tick the window is fed.
+  narrate($)
 
   if (list.some(isBusy)) {
     idleTicks = 0
@@ -420,6 +451,7 @@ async function admit(
   $: EngineInterface,
   row: AgentRow,
   isResume: boolean,
+  ask: string,
 ): Promise<void> {
   strangers.delete(row.id)
   heard.add(row.id)
@@ -432,6 +464,12 @@ async function admit(
   await show($)
   post($, rows)
   await tidy($)
+
+  // The brief, already masked and cut, for the narrator to say what the agent is fixing.
+  if (isNarratorOn && ask !== '' && rows.some(one => one.id === row.id)) {
+    await update($, trails, held => asked(held, row.id, ask))
+  }
+
   changed($, rows)
 }
 
@@ -454,6 +492,22 @@ function keyOf(input: Readonly<Record<string, unknown>>, startedAt: number): str
   serial += 1
 
   return `${startedAt}-${serial}`
+}
+
+/**
+ * What a tool call answered, as text: the refusal, the text the model read,
+ * or a result that is a string. Only its opening is ever read.
+ */
+function answered(ran: { deny?: string; text?: string; result?: unknown }): string {
+  if (typeof ran.deny === 'string') {
+    return ran.deny
+  }
+
+  if (typeof ran.text === 'string') {
+    return ran.text
+  }
+
+  return typeof ran.result === 'string' ? ran.result : ''
 }
 
 /**
@@ -493,10 +547,117 @@ async function writeData($: EngineInterface): Promise<void> {
     throw new Error('the window has no folder or no name to write under')
   }
 
-  const [rows, held] = await Promise.all([read($, agents), read($, trails)])
-  const data = payload({ id: sid, cwd }, rows, held, clock())
+  const [rows, held, story] = await Promise.all([
+    read($, agents),
+    read($, trails),
+    read($, narration),
+  ])
+  const now = clock()
+  const data = {
+    ...payload({ id: sid, cwd }, rows, held, now),
+    cards: cardsOf(rows, held, story, now, isNarratorOn),
+  }
 
   await $.fs.write(filed(under, `${sid}.js`), dataFile(data))
+}
+
+// --- The narrator: plain words for the cards, at the moments that matter -----
+//
+// Planned in the queue, where rows, trails and the narration change in turn;
+// fired outside it, so no fold waits on a model; each answer folded back in
+// through the queue. The rules in `narrator.ts` hold its budget.
+
+/**
+ * Asks for the narrator to look at the agents again, in its turn of the
+ * queue: a burst of changes shares one look. Only while the window is fed
+ * and the options leave it on.
+ */
+function narrate($: EngineInterface): void {
+  if (!isNarratorOn || !isGuiOn || isPlanQueued) {
+    return
+  }
+
+  isPlanQueued = true
+  enqueue($, 'narrator plan', async () => {
+    isPlanQueued = false
+
+    const [rows, held, story] = await Promise.all([
+      read($, agents),
+      read($, trails),
+      read($, narration),
+    ])
+    const now = clock()
+    const { narration: next, asks } = planned(story, rows, held, now)
+    // The page is written again only when what it shows moved.
+    const isShown =
+      asks.length > 0 ||
+      JSON.stringify(cardsOf(rows, held, next, now, true)) !==
+        JSON.stringify(cardsOf(rows, held, story, now, true))
+
+    if (JSON.stringify(next) !== JSON.stringify(story)) {
+      await update($, narration, () => next)
+    }
+
+    for (const ask of asks) {
+      speak($, ask)
+    }
+
+    if (isShown) {
+      refresh($)
+    }
+  })
+}
+
+/** The engine's answer as the narrator reads it: a call it would not send is `refused`. */
+function replyOf(result: unknown): Reply {
+  const value = result as Partial<Reply> | undefined
+
+  if (value?.isAnswered === true && typeof value.text === 'string') {
+    return { isAnswered: true, text: value.text, usage: value.usage ?? NO_COST }
+  }
+
+  if (value?.isAnswered === false && typeof value.reason === 'string') {
+    const reply: Reply = { isAnswered: false, reason: value.reason, usage: value.usage ?? NO_COST }
+
+    if (typeof value.error === 'string') {
+      reply.error = value.error
+    }
+
+    if (typeof value.status === 'number' || value.status === null) {
+      reply.status = value.status
+    }
+
+    return reply
+  }
+
+  return { isAnswered: false, reason: 'empty-reply', usage: NO_COST }
+}
+
+/**
+ * Makes one narrator call outside the queue, and folds its answer back in
+ * through it: the cost counted, the card's words taken or the failure noted,
+ * the page rewritten, and a freed slot offered to what waits.
+ */
+function speak($: EngineInterface, ask: Ask): void {
+  $.model
+    .complete(ask.request)
+    .then(replyOf, (error: unknown): Reply => {
+      debug($, 'narrator call not sent', error)
+
+      return { isAnswered: false, reason: 'refused', usage: NO_COST }
+    })
+    .then(reply =>
+      enqueue($, 'narrator answer', async () => {
+        if (!reply.isAnswered) {
+          debug($, 'narrator gave no words', `${reply.reason}${reply.error === undefined ? '' : ` ${reply.error}`}`)
+        }
+
+        await update($, narration, held => landed(held, ask, reply, clock()))
+        refresh($)
+        narrate($)
+      }),
+    )
+    .catch((error: unknown) => debug($, 'narrator answer lost', error))
 }
 
 /**
@@ -738,11 +899,14 @@ function autoOpen($: EngineInterface, rows: readonly AgentRow[]): void {
 /** After the rows or the trails changed: the window opens if it is time, and its data is rewritten. */
 function changed($: EngineInterface, rows: readonly AgentRow[]): void {
   autoOpen($, rows)
+  // The narrator looks before the write, so a moment it takes is in it.
+  narrate($)
   refresh($)
 }
 
 export const register: Register = (on, options) => {
   isAutoOpen = options.autoOpenWindow === true
+  isNarratorOn = options.narrator !== false
 
   on('session.start', async ($, e, next) => {
     isOff =
@@ -778,6 +942,11 @@ export const register: Register = (on, options) => {
 
       sid = isSid(stored.sid) ? stored.sid : ''
       isGuiOn = stored.isOn === true && sid !== ''
+      // Calls out before a reload are gone with it: their slots are freed and
+      // their moments asked again. A store that fails costs only that.
+      await update($, narration, restarted).catch((error: unknown) =>
+        debug($, 'narration not restarted', error),
+      )
 
       const list = await sync($)
 
@@ -889,9 +1058,11 @@ export const register: Register = (on, options) => {
 
       const row = born(id, clock(), known)
       const isResume = e.resume !== undefined
+      // Masked and cut here: only that ever reaches the narrator.
+      const ask = isNarratorOn ? brief(e.prompt ?? '', ASK_MAX) : ''
 
       grace = GRACE
-      enqueue($, 'spawn', () => admit($, row, isResume))
+      enqueue($, 'spawn', () => admit($, row, isResume, ask))
     } catch (error) {
       debug($, 'spawn not noted', error)
     }
@@ -926,9 +1097,11 @@ export const register: Register = (on, options) => {
     const activity = describeCall(e.tool, input)
     const isCounted = !isBookkeeping(e.tool)
     const startedAt = clock()
-    const call = called(keyOf(input, startedAt), activity, startedAt)
+    const call = called(keyOf(input, startedAt), activity, startedAt, kindOf(e.tool, input))
     // Failed, until the call comes back with an answer that is no error and no refusal.
     let isFailed = true
+    // The opening of what it answered, masked: for the narrator alone.
+    let out = ''
 
     grace = GRACE
     enqueue($, 'tool call', () =>
@@ -944,6 +1117,7 @@ export const register: Register = (on, options) => {
       const ran = await next(e)
 
       isFailed = ran.deny !== undefined || ran.isError === true
+      out = isNarratorOn ? outOf(answered(ran)) : ''
 
       return ran
     } finally {
@@ -955,7 +1129,7 @@ export const register: Register = (on, options) => {
           $,
           id,
           held => rested(held, id, endedAt),
-          held => finished(held, id, call.key, endedAt, isFailed),
+          held => finished(held, id, call.key, endedAt, isFailed, out),
         ),
       )
     }

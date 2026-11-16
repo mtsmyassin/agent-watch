@@ -309,6 +309,23 @@ test('a refusal that will not clear stops the narrator for the session', () => {
   expect(cardsOf([live('a1')], { a1: begun() }, back, T + 2000, true).narrator.state).toBe('halted')
 })
 
+test('a call the engine will not send stops the narrator for the session', () => {
+  const plan = planned(EMPTY, [live('a1')], { a1: begun() }, T + 1000)
+  const back = landed(plan.narration, plan.asks[0] as Ask, { isAnswered: false, reason: 'refused', usage: NONE }, T + 1001)
+
+  expect(back.ledger.halt).toMatch(/would not send/)
+  expect(back.ledger.failed).toBe(1)
+  expect(planned(back, [live('a1'), live('a2')], { a1: begun(), a2: begun() }, T + 60_000).asks).toEqual([])
+})
+
+test('a card the narrator has not planned for yet waits, or once over shows its own answer', () => {
+  const over = live('a2', { state: 'completed', endedAt: T + 500, answer: 'Done.' })
+  const cards = cardsOf([live('a1'), over], {}, EMPTY, T + 1000, true)
+
+  expect(cards.agents.a1?.mode).toBe('writing')
+  expect(cards.agents.a2?.mode).toBe('own')
+})
+
 test('three failures in a row stop it too', () => {
   const ids = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7']
   const rows = ids.map(id => live(id))
