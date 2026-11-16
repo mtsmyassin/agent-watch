@@ -102,8 +102,8 @@ test('the prompt carries the brief, a tally and the evidence, masked', () => {
   const lead = 'Brief it was given: '
   const briefLine = prompt.split('\n').find(line => line.startsWith(lead)) ?? ''
 
-  expect(ask?.request.maxTokens).toBe(320)
-  expect(MAX_TOKENS).toBe(320)
+  expect(ask?.request.maxTokens).toBe(1024)
+  expect(MAX_TOKENS).toBe(1024)
   expect(prompt).not.toContain(secret)
   expect(prompt).not.toContain('secret-place')
   expect(briefLine).toContain('Fix the login, see notes.md.')

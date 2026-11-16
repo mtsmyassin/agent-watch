@@ -221,7 +221,7 @@ test('what is sent is masked and framed as data', () => {
   expect(ask?.request.model).toBe(MODEL)
   expect(MODEL).toBe('claude-haiku-5-5')
   expect(ask?.request.maxTokens).toBe(MAX_TOKENS)
-  expect(MAX_TOKENS).toBe(320)
+  expect(MAX_TOKENS).toBe(1024)
   expect(ask?.request.timeoutMs).toBe(TIMEOUT_MS)
   expect(TIMEOUT_MS).toBe(15_000)
   expect(ask?.request.system).toEqual([{ text: AGENT_SYSTEM, cache: true }])
@@ -261,7 +261,7 @@ test('a reply without now or how, or not JSON, is discarded', () => {
   expect(teamParsed('nothing')).toBeUndefined()
 })
 
-test('control characters are stripped and each field is held to 200 letters', () => {
+test('control characters are stripped and each field is held to its cap', () => {
   const tick = String.fromCharCode(96)
   const told = parsed(
     JSON.stringify({
@@ -272,7 +272,7 @@ test('control characters are stripped and each field is held to 200 letters', ()
   )
 
   expect(told?.now).toBe('Reading the notes now')
-  expect(told?.how.length).toBeLessThanOrEqual(200)
+  expect(told?.how.length).toBeLessThanOrEqual(320)
   expect(told?.next).toBe('Run pytest now')
   expect(clean(42)).toBe('')
   // Markup stays text: the page sets it with textContent.

@@ -173,6 +173,8 @@ export type Ledger = {
   pausedUntil?: number
   /** Why it paused, in plain words. */
   pauseWhy?: string
+  /** Replies that ran into the token cap and lost their end. */
+  cut?: number
   team?: { text: string; at: number }
   teamPending?: true
   /** When the last moment worth a team sentence came. */
@@ -216,6 +218,8 @@ export type Cards = {
     plan?: string
     /** While paused: when it tries again. */
     until?: number
+    /** Replies cut off at the token cap this session, when any were. */
+    cut?: number
     model: string
     calls: number
     limit: number
