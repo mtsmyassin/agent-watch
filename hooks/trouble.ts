@@ -298,7 +298,10 @@ function failingOf(kinded: readonly Call[], from: number): Trouble | undefined {
   }
 
   if (same !== undefined) {
-    const { count, call } = same
+    const { call } = same
+    // Found within the newest 8; told as every failure of that step, so the count is exact.
+    const key = stepKey(call)
+    const count = kinded.filter(one => isFailed(one) && stepKey(one) === key).length
 
     return trouble(
       'failing',
@@ -354,10 +357,15 @@ function circlesOf(kinded: readonly Call[], from: number): Trouble | undefined {
     return undefined
   }
 
+  // Found within the newest 12; told as every time it did that step, so the
+  // count is exact and does not stop at 12 while the loop goes on.
+  const key = stepKey(best.call)
+  const count = kinded.filter(call => !isFailed(call) && stepKey(call) === key).length
+
   return trouble(
     'circles',
-    `${best.call.did} ${best.count} times`,
-    `It has done the same step ${best.count} times. If it keeps on, stop it and tell it exactly where to look.`,
+    `${best.call.did} ${count} times`,
+    `It has done the same step ${count} times. If it keeps on, stop it and tell it exactly where to look.`,
   )
 }
 

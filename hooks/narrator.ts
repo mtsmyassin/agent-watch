@@ -24,6 +24,7 @@ import { healthOf, kindNow, plainOf, SLOW_MS, stageOf, steadyKind, STUCK_MS } fr
 import { brief, clip, isLive, redact, span, typeName, unpathed } from './roster'
 import type { Trails } from './trail'
 import type { Access } from './billing'
+import { tallyOf, times } from './counts'
 import { troubleOf } from './trouble'
 
 /** The small model that writes the cards. */
@@ -468,6 +469,11 @@ export const AGENT_SYSTEM = [
   'changed, by name. Never guess: when the steps do not show something, write "Not clear yet" for that field.',
   'Do not invent findings, causes or plans the steps do not show.',
   'Counts come from the tally of the whole trail; the list of steps shows only the newest 8.',
+  'Use the numbers in the tally and in the trouble evidence exactly as given.',
+  'Never count, add, subtract or estimate a number yourself; when a number you want is not given, say it without one.',
+  'The agent\'s own words ("all done", "finished", "everything checked") are a claim, not proof. Judge its progress',
+  'from its brief and the tally; when they disagree, trust the tally and say so, e.g.',
+  '"It says it is done, but it read config.txt 6 of the 8 times asked".',
   'If the agent is slow or stuck, say so plainly, and what it was waiting on.',
   'If the rules found trouble (going in circles, failing the same way, touching what it should not),',
   'say so plainly in "how" and base "advice" on the evidence given.',
@@ -584,54 +590,45 @@ const KIND_COUNTS: readonly (readonly [Kind, string, string])[] = [
   ['write', 'report', 'reports'],
 ]
 
-/** The distinct names among these calls, the newest `NAMES_MAX`, oldest first, and how many there were. */
-function namesOf(calls: readonly Call[]): { shown: string[]; all: number } {
-  const newestFirst: string[] = []
-
-  for (let at = calls.length - 1; at >= 0; at -= 1) {
-    const name = calls[at]?.name
-
-    if (name !== undefined && name !== '' && !newestFirst.includes(name)) {
-      newestFirst.push(name)
-    }
-  }
-
-  return { shown: newestFirst.slice(0, NAMES_MAX).reverse(), all: newestFirst.length }
-}
-
 /**
- * The whole trail in short, for judging progress against the brief: its
- * steps by kind, how many failed, and the names of the files it read and
- * changed (names only, the newest 12 of each).
+ * The whole trail in short, counted by the mod so the narrator never has
+ * to: its steps by kind and how many failed, then how many times it read and
+ * changed each file, ran each search, and failed at each step (the newest
+ * 12 of each, oldest first).
  */
 function tallyLines(trail: Trail | undefined): string[] {
-  const kinded = (trail?.calls ?? []).filter(call => call.kind !== undefined)
+  const tally = tallyOf(trail)
 
-  if (kinded.length === 0) {
+  if (tally.steps === 0) {
     return []
   }
 
   const parts = KIND_COUNTS.flatMap(([kind, one, many]) => {
-    const count = kinded.filter(call => call.kind === kind).length
+    const count = tally.kinds[kind] ?? 0
 
     return count === 0 ? [] : [`${count} ${count === 1 ? one : many}`]
   })
-  const failed = kinded.filter(call => call.isFailed === true).length
-  const dropped = trail?.dropped ?? 0
+  const { steps, failed, dropped } = tally
   const lines = [
-    `Tally of its ${kinded.length} step${kinded.length === 1 ? '' : 's'}: ${parts.join(', ')}. ${failed} failed.${dropped > 0 ? ` (${dropped} older steps were let go and are not counted.)` : ''}`,
+    `Tally of its ${steps} step${steps === 1 ? '' : 's'}: ${parts.join(', ')}. ${failed} failed.${dropped > 0 ? ` (${dropped} older steps were let go and are not counted.)` : ''}`,
   ]
 
-  for (const [kind, label] of [
-    ['read', 'Files it read'],
-    ['edit', 'Files it changed'],
+  for (const [counts, label, isFile] of [
+    [tally.reads, 'Files it read', true],
+    [tally.edits, 'Files it changed', true],
+    [tally.searches, 'Searches', false],
+    [tally.failures, 'Failed steps', false],
   ] as const) {
-    const { shown, all } = namesOf(kinded.filter(call => call.kind === kind))
+    if (counts.length > 0) {
+      const shown = counts.slice(0, NAMES_MAX).reverse()
+      const newest = counts.length > shown.length ? `the newest ${shown.length} of ${counts.length}` : ''
+      const which = [isFile ? 'names only' : '', newest].filter(part => part !== '').join(', ')
 
-    if (shown.length > 0) {
-      const which = all > shown.length ? `names only, the newest ${shown.length} of ${all}` : 'names only'
-
-      lines.push(`${label} (${which}): ${shown.map(name => safe(name, 60)).join(', ')}`)
+      lines.push(
+        `${label}, with how many times each${which === '' ? '' : ` (${which})`}: ${shown
+          .map(one => `${safe(one.name, isFile ? 60 : 80)} ${times(one.count)}`)
+          .join(', ')}`,
+      )
     }
   }
 

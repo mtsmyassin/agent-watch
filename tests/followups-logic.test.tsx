@@ -1,8 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
-import { EMPTY, planned, REFRESH_MS } from '../hooks/narrator'
+import { tallyOf } from '../hooks/counts'
+import { AGENT_SYSTEM, EMPTY, planned, REFRESH_MS } from '../hooks/narrator'
 import type { Ask } from '../hooks/narrator'
 import { born } from '../hooks/roster'
+import { troubleOf } from '../hooks/trouble'
 import type { AgentRow, Call, Kind, Narration, Seen, Story, Trail } from '../types'
 
 // The narrator follow-ups, with no engine under them: advice on time (an
@@ -142,4 +144,73 @@ test('the refresh prompt says why it is asked', () => {
   const [again] = planned(stuck, [live('a1')], { a1: trailOf(c('read', 'Read a.py')) }, T + 150_000).asks
 
   expect(again?.request.prompt).toContain('Why you are asked now: It still looks stuck')
+})
+
+test('the prompt gives exact counts per file and per step', () => {
+  const failed = { isFailed: true } as const
+  const calls = [
+    c('read', 'Read notes.md', { name: 'notes.md' }),
+    c('read', 'Read notes.md', { name: 'notes.md', step: 'notes@2' }),
+    c('read', 'Read gone.txt', { name: 'gone.txt', ...failed }),
+    c('read', 'Read gone.txt', { name: 'gone.txt', ...failed, step: 'gone@2' }),
+    ...[1, 2, 3].map(n => c('search', 'Searched for login', { step: `login@${n}` })),
+    c('edit', 'Edited a.py', { name: 'a.py' }),
+    c(undefined, 'Updated the task list'),
+    ...loop(22),
+  ]
+  const trail = trailOf(...calls)
+
+  expect(tallyOf(trail)).toEqual({
+    steps: 30,
+    failed: 2,
+    dropped: 0,
+    kinds: { read: 26, search: 3, edit: 1 },
+    reads: [
+      { name: 'config.txt', count: 22 },
+      { name: 'gone.txt', count: 2 },
+      { name: 'notes.md', count: 2 },
+    ],
+    edits: [{ name: 'a.py', count: 1 }],
+    searches: [{ name: 'Searched for login', count: 3 }],
+    failures: [{ name: 'Read gone.txt', count: 2 }],
+  })
+
+  const [ask] = planned(EMPTY, [live('a1')], { a1: trail }, T + 3000).asks
+  const prompt = ask?.request.prompt ?? ''
+
+  expect(prompt).toContain('Tally of its 30 steps: 26 reads, 3 searches, 1 edit. 2 failed.')
+  expect(prompt).toContain(
+    'Files it read, with how many times each (names only): notes.md 2 times, gone.txt 2 times, config.txt 22 times',
+  )
+  expect(prompt).toContain('Files it changed, with how many times each (names only): a.py once')
+  expect(prompt).toContain('Searches, with how many times each: Searched for login 3 times')
+  expect(prompt).toContain('Failed steps, with how many times each: Read gone.txt 2 times')
+  // The trouble line gives the exact repeat count, all of it.
+  expect(prompt).toContain('Read config.txt 22 times (going in circles)')
+  // Still the newest 8 steps, one line each.
+  expect(prompt.match(/^- /gm)?.length).toBe(8)
+})
+
+test('the trouble evidence counts every repeat, not only the newest twelve', () => {
+  expect(troubleOf(loop(22), false)).toEqual([
+    {
+      sign: 'circles',
+      evidence: 'Read config.txt 22 times',
+      advice: 'It has done the same step 22 times. If it keeps on, stop it and tell it exactly where to look.',
+    },
+  ])
+
+  const gone = Array.from({ length: 10 }, () => c('read', 'Read gone.txt', { isFailed: true }))
+
+  expect(troubleOf(gone, false)[0]?.evidence).toBe('Read gone.txt failed 10 times')
+  // Finding it is unchanged: three within the newest twelve.
+  expect(troubleOf([config(), ...Array.from({ length: 10 }, (_, n) => c('read', `Read f${n}.py`)), config(), config()], false)).toEqual([])
+})
+
+test("the narrator is told to use the numbers given, and to weigh the agent's own words", () => {
+  expect(AGENT_SYSTEM).toContain('Counts come from the tally of the whole trail')
+  expect(AGENT_SYSTEM).toContain('Never count, add, subtract or estimate a number yourself')
+  expect(AGENT_SYSTEM).toContain('are a claim, not proof')
+  expect(AGENT_SYSTEM).toContain('trust the tally and say so')
+  expect(AGENT_SYSTEM).toContain('"It says it is done, but it read config.txt 6 of the 8 times asked"')
 })

@@ -112,10 +112,11 @@ test('the prompt carries the brief, a tally and the evidence, masked', () => {
   expect(briefLine.length).toBeGreaterThan(lead.length + 400)
   expect(briefLine.length).toBeLessThanOrEqual(lead.length + 600)
   expect(prompt).toContain('Tally of its 21 steps: 18 reads, 2 edits, 1 test or check run. 1 failed.')
-  expect(prompt).toContain('Files it read (names only, the newest 12 of 15): f3.py, f4.py,')
-  expect(prompt).toContain('f13.py, config.py')
+  // Each file now comes with how many times (the follow-ups: the mod counts, not the model).
+  expect(prompt).toContain('Files it read, with how many times each (names only, the newest 12 of 15): f3.py once, f4.py once,')
+  expect(prompt).toContain('f13.py once, config.py 4 times')
   expect(prompt).not.toContain(' f2.py')
-  expect(prompt).toContain('Files it changed (names only): auth.py, settings.json')
+  expect(prompt).toContain('Files it changed, with how many times each (names only): auth.py once, settings.json once')
   expect(prompt).toContain(
     'Trouble the rules found: Changed a file outside this project: settings.json (touching what it should not); Read config.py 4 times (going in circles).',
   )

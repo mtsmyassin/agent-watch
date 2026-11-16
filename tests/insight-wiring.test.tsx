@@ -140,7 +140,7 @@ test('an agent reading the same file three times shows going in circles, and the
     advice: 'It has done the same step 3 times. If it keeps on, stop it and tell it exactly where to look.',
   })
   expect(r.asked[0]?.prompt).toContain('Read config.py 3 times (going in circles)')
-  expect(r.asked[0]?.prompt).toContain('Files it read (names only): config.py')
+  expect(r.asked[0]?.prompt).toContain('Files it read, with how many times each (names only): config.py 3 times')
 })
 
 test("the narrator's progress and advice reach the page", async ($, on) => {
