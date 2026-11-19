@@ -16,8 +16,6 @@ At the prompt of a Claude Code terminal session:
 
 Answer `y` to add the marketplace, then pick a scope. `user` installs it for every project.
 
-This repository is private. Your GitHub account has to be invited to it, and GitHub has to be set up on your computer (`gh auth login`) before the line above can fetch it.
-
 ## Using it
 
 The pane opens by itself when the first agent starts, and closes by itself about 15 seconds after the last one finishes. In the fullscreen layout it docks beside the transcript; in the normal layout it sits above the prompt and is only as tall as its rows. Where the pane is too narrow for every column, each row folds: who and how long on one line, what it is doing on the line beneath.

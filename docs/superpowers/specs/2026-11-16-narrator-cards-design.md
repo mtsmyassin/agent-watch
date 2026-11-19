@@ -1,7 +1,7 @@
 # agent-watch: narrator cards — design
 
 Date: 2026-11-16. Owner: Mutasim. Status: approved by him ("ship it", 2026-11-16 ~01:05) on the decisions below,
-built from the throwaway demo at `C:\Users\mtsmy\.claude\mods-work\agent-watch-spike\demo2.html` (the visual
+built from a throwaway local demo, `demo2.html`, that is not in this repository (the visual
 reference: open it in Edge and press 4x to see the whole run).
 
 ## Why
