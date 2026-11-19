@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-tests:
+    # The mod is built and used on Windows; several tests (window opening,
+    # config-file plan detection) only hold there.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code (the version the mod is built on)
+        run: npm install -g @anthropic-ai/claude-code@2.1.325
+
+      - name: Run the mod's tests
+        run: claude plugin test .
