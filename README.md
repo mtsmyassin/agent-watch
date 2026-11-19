@@ -16,6 +16,8 @@ At the prompt of a Claude Code terminal session:
 
 Answer `y` to add the marketplace, then pick a scope. `user` installs it for every project.
 
+Mods need Claude Code 2.1.287 or later. agent-watch is built and tested on Windows with Claude Code 2.1.322 and 2.1.325.
+
 ## Using it
 
 The pane opens by itself when the first agent starts, and closes by itself about 15 seconds after the last one finishes. In the fullscreen layout it docks beside the transcript; in the normal layout it sits above the prompt and is only as tall as its rows. Where the pane is too narrow for every column, each row folds: who and how long on one line, what it is doing on the line beneath.
@@ -90,4 +92,8 @@ claude plugin validate .
 claude plugin test .
 ```
 
-The tests are in `tests/`: `agent-watch.test.tsx` for the pane and the window's data, `narrator.test.tsx` for the kind, stage and health rules, `narrator-logic.test.tsx` for when the narrator speaks and what it may say, `narrator-wiring.test.tsx` for the narrator inside the mod, `trouble.test.tsx` for the trouble rules, `insight-logic.test.tsx` and `insight-wiring.test.tsx` for trouble, progress and advice in the narrator and the mod, `billing.test.tsx` and `always-on.test.tsx` for the plan guard and the pauses, `detail.test.tsx` for the narrator's lengths and grounding, and `auto-open.test.tsx` for the window opening by itself. The rules themselves are pure functions in `hooks/infer.ts`, `hooks/trouble.ts`, `hooks/billing.ts` and `hooks/narrator.ts`. Built and tested on Claude Code 2.1.322 and 2.1.325; the mods API is early access, so a later version may need changes.
+The tests are in `tests/`: `agent-watch.test.tsx` for the pane and the window's data, `narrator.test.tsx` for the kind, stage and health rules, `narrator-logic.test.tsx` for when the narrator speaks and what it may say, `narrator-wiring.test.tsx` for the narrator inside the mod, `trouble.test.tsx` for the trouble rules, `insight-logic.test.tsx` and `insight-wiring.test.tsx` for trouble, progress and advice in the narrator and the mod, `billing.test.tsx` and `always-on.test.tsx` for the plan guard and the pauses, `detail.test.tsx` for the narrator's lengths and grounding, and `auto-open.test.tsx` for the window opening by itself. The rules themselves are pure functions in `hooks/infer.ts`, `hooks/trouble.ts`, `hooks/billing.ts` and `hooks/narrator.ts`. Built and tested on Claude Code 2.1.322 and 2.1.325; the mods API is still new, so a later version may need changes.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The animation library and fonts bundled in `gui/` keep their own licenses, listed in [`gui/NOTICE.md`](gui/NOTICE.md).
